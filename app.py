@@ -241,13 +241,20 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             ("Current Renewal – Family", renewal_data.get("rate_fam")),
         ]
 
+        def set_with_font(row, col, value, font=None):
+            safe_set(ws, row, col, value)
+            if font:
+                ws.cell(row, col).font = font
+
+        label_font = Font(bold=True, size=10, color="666666")
+        savings_font = Font(bold=True, size=10, color="166534")
+
         for ri, (label, val) in enumerate(renewal_rows):
             r = rr + ri
-            ws.cell(r, 3).value = label
-            ws.cell(r, 3).font = Font(bold=True, size=10, color="666666")
+            set_with_font(r, 3, label, label_font)
             for idx, sp in enumerate(selected_plans):
                 col = start_col + idx
-                ws.cell(r, col).value = float(val) if val else ""
+                safe_set(ws, r, col, float(val) if val else "")
 
         # Savings rows
         sr = rr + len(renewal_rows) + 1
@@ -258,8 +265,7 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             "Family Savings vs Renewal (%)",
         ]
         for i, label in enumerate(savings_labels):
-            ws.cell(sr + i, 3).value = label
-            ws.cell(sr + i, 3).font = Font(bold=True, size=10, color="166534")
+            set_with_font(sr + i, 3, label, savings_font)
 
         ren_ee = float(renewal_data.get("rate_ee") or 0)
         ren_fam = float(renewal_data.get("rate_fam") or 0)
@@ -270,11 +276,11 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
                 p_ee = float(sp["plan"].get("rate_ee") or 0)
                 p_fam = float(sp["plan"].get("rate_fam") or 0)
                 if p_ee and ren_ee:
-                    ws.cell(sr, col).value = round(ren_ee - p_ee, 2)
-                    ws.cell(sr + 1, col).value = f"{round((ren_ee - p_ee) / ren_ee * 100, 1)}%"
+                    safe_set(ws, sr, col, round(ren_ee - p_ee, 2))
+                    safe_set(ws, sr + 1, col, f"{round((ren_ee - p_ee) / ren_ee * 100, 1)}%")
                 if p_fam and ren_fam:
-                    ws.cell(sr + 2, col).value = round(ren_fam - p_fam, 2)
-                    ws.cell(sr + 3, col).value = f"{round((ren_fam - p_fam) / ren_fam * 100, 1)}%"
+                    safe_set(ws, sr + 2, col, round(ren_fam - p_fam, 2))
+                    safe_set(ws, sr + 3, col, f"{round((ren_fam - p_fam) / ren_fam * 100, 1)}%")
             except (TypeError, ValueError):
                 pass
 
