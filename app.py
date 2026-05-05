@@ -199,8 +199,8 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
 
     if renewal_data:
         renewal_plan_dict = {k: v for k, v in renewal_data.items() if k != "carrier"}
-        if not renewal_plan_dict.get("plan_name"):
-            renewal_plan_dict["plan_name"] = "Current Plan"
+        # Don't use "Current Plan" as a fallback - leave empty if no name extracted
+        # (user can edit the preview before generating)
         selected_plans = [{
             "carrier": renewal_data.get("carrier") or "Current Renewal",
             "plan": renewal_plan_dict,
@@ -208,7 +208,7 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
         }] + list(selected_plans)
 
     tmpl_col = start_col
-    RENEWAL_FILL = PatternFill("solid", fgColor="FFF8E1")
+    # No special fill for renewal - blend in naturally with the template
     for idx, sp in enumerate(selected_plans):
         col = start_col + idx
         plan = sp["plan"]
@@ -222,8 +222,6 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if idx > 0:
                 copy_cell_style(ws.cell(plan_row, tmpl_col), ws.cell(plan_row, col))
             safe_set(ws, plan_row, col, plan.get("plan_name") or "")
-            if is_renewal:
-                ws.cell(plan_row, col).fill = RENEWAL_FILL
 
         for field_key, row in row_map.items():
             value = build_value(field_key, plan)
@@ -232,8 +230,6 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if idx > 0:
                 copy_cell_style(ws.cell(row, tmpl_col), ws.cell(row, col))
             safe_set(ws, row, col, value)
-            if is_renewal:
-                ws.cell(row, col).fill = RENEWAL_FILL
 
     if carrier_row > 0:
         groups = []
@@ -257,6 +253,38 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if last_col > first_col:
                 ws.merge_cells(start_row=carrier_row, start_column=first_col,
                                end_row=carrier_row, end_column=last_col)
+
+    # Clear any leftover placeholder columns beyond the data we wrote
+    n_written = len(selected_plans)  # total columns written (including renewal)
+    last_data_col = start_col + n_written - 1
+
+    # Detect placeholder cells in carrier_row and plan_row beyond our data
+    if plan_row > 0 and carrier_row > 0:
+        for c in range(last_data_col + 1, ws.max_column + 1):
+            # Check if this column has placeholder text we should clear
+            for r in [carrier_row, plan_row]:
+                cell_val = ws.cell(r, c).value
+                if cell_val:
+                    s = str(cell_val).lower().strip()
+                    if any(k in s for k in ("carrier ", "plan ", "carrier#", "plan#")):
+                        # Unmerge if needed, then clear
+                        for merged in list(ws.merged_cells.ranges):
+                            if (merged.min_row <= r <= merged.max_row and
+                                    merged.min_col <= c <= merged.max_col):
+                                ws.unmerge_cells(str(merged))
+                                break
+                        ws.cell(r, c).value = None
+
+            # Also clear benefit row values in unused columns (in case template has demo data)
+            for field_key, row in row_map.items():
+                cell_val = ws.cell(row, c).value
+                if cell_val is not None:
+                    for merged in list(ws.merged_cells.ranges):
+                        if (merged.min_row <= row <= merged.max_row and
+                                merged.min_col <= c <= merged.max_col):
+                            ws.unmerge_cells(str(merged))
+                            break
+                    ws.cell(row, c).value = None
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -385,13 +413,14 @@ def generate():
     client_name = payload.get("clientName", "Group")
     renewal_data = payload.get("renewalData")
 
-    plan_count = len(selected_plans)
-    template_path = pick_template_path(plan_count)
+    # Total columns = carrier plans + renewal (if present)
+    total_cols = len(selected_plans) + (1 if renewal_data else 0)
+    template_path = pick_template_path(total_cols)
 
     # Diagnostics
     available = [s for s, p in TEMPLATE_FILES.items() if p.exists()]
-    chosen_size = min(max(plan_count, 1), MAX_TEMPLATE_SIZE)
-    print(f"[generate] plan_count={plan_count}, chosen_size={chosen_size}, available_templates={available}, path_exists={template_path.exists() if template_path else False}")
+    chosen_size = min(max(total_cols, 1), MAX_TEMPLATE_SIZE)
+    print(f"[generate] carrier_plans={len(selected_plans)}, renewal={bool(renewal_data)}, total_cols={total_cols}, chosen_size={chosen_size}, available_templates={available}, path_exists={template_path.exists() if template_path else False}")
 
     if not template_path or not template_path.exists():
         msg = f"No {chosen_size}-plan template uploaded. Available templates: {available or 'none'}. Upload via Manage Templates."
