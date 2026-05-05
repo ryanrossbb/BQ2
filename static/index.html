@@ -549,7 +549,7 @@ async function startExtraction() {
   set({ step: 2, error: '', warn: '' });
 
   const CARRIER_SCHEMA = '{"carrier":"string","plans":[{"plan_name":"","network":"","ded_ind":"","ded_fam":"","coinsurance":"","moop_ind":"","moop_fam":"","pcp":"","telehealth":"","specialist":"","inpatient":"","op_facility":"","er":"","urgent_care":"","lab":"","xray":"","imaging":"","oon_ded":"","oon_moop":"","oon_coins":"","rx_ded":"","rx_generic":"","rx_preferred":"","rx_nonpref":"","rx_specialty":"","rate_ee":0,"rate_es":0,"rate_ec":0,"rate_fam":0,"notes":""}]}';
-  const RENEWAL_SCHEMA = '{"carrier":"","plan_name":"","rate_ee":0,"rate_es":0,"rate_ec":0,"rate_fam":0}';
+  const RENEWAL_SCHEMA = CARRIER_SCHEMA;  // extract full benefits for renewal too
 
   // Process all files in parallel
   const carriers = [];
@@ -565,13 +565,13 @@ async function startExtraction() {
       const isRenewal = f.role === 'renewal';
       const schema = isRenewal ? RENEWAL_SCHEMA : CARRIER_SCHEMA;
       const prompt = isRenewal
-        ? `Extract the current renewal rates from this insurance contract PDF. Return ONLY this JSON: ${schema}`
+        ? `Extract the current renewal plan from this insurance contract PDF, including all benefit details (deductible, copays, coinsurance, MOOP, Rx tiers) AND rates. Return ONLY one plan in the plans array. Be concise. Return JSON matching this schema exactly: ${schema}`
         : `Extract all medical plans from this carrier quote PDF. Be concise. Return JSON matching this schema exactly: ${schema}`;
 
       const body = {
         _apiKey: S.apiKey,
         model: "claude-sonnet-4-20250514",
-        max_tokens: isRenewal ? 500 : 16000,
+        max_tokens: isRenewal ? 4000 : 16000,
         system: "Extract medical insurance data from carrier PDFs. Return ONLY valid compact JSON, no markdown, no code fences.",
         messages: [{
           role: "user",
@@ -601,7 +601,14 @@ async function startExtraction() {
       f.data = parsed;
       f.status = 'done';
 
-      if (isRenewal) renewalData = parsed;
+      if (isRenewal) {
+        // renewal returns full carrier shape with plans[]; flatten to single plan + carrier name
+        const rPlan = (parsed.plans && parsed.plans[0]) || {};
+        renewalData = {
+          carrier: parsed.carrier || 'Current Renewal',
+          ...rPlan
+        };
+      }
       else carriers.push(parsed);
     } catch (e) {
       f.status = 'error';
@@ -689,28 +696,49 @@ function viewSelect() {
 
   // Renewal info card
   let renewalCard = '';
-  if (rd && rd.rate_ee) {
+  if (rd) {
+    const detailRow = (label, val) => val ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--gray-100);font-size:12px"><span style="color:var(--gray-500)">${label}</span><span style="font-weight:500;color:var(--gray-700)">${escHtml(String(val))}</span></div>` : '';
     renewalCard = `
     <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--accent)">
-      <div class="card-title"><span class="card-title-emoji">🔄</span> Current Renewal — Comparison Baseline</div>
+      <div class="card-title"><span class="card-title-emoji">🔄</span> Current Renewal${rd.carrier ? ' — '+escHtml(rd.carrier) : ''}${rd.plan_name ? ' / '+escHtml(rd.plan_name) : ''}</div>
       <div class="rate-comp">
         <div class="rate-stat">
           <div class="rate-stat-label">EE Only</div>
-          <div class="rate-stat-value">$${Number(rd.rate_ee).toFixed(2)}</div>
+          <div class="rate-stat-value">${rd.rate_ee ? '$'+Number(rd.rate_ee).toFixed(2) : '—'}</div>
         </div>
         <div class="rate-stat">
           <div class="rate-stat-label">EE + Spouse</div>
-          <div class="rate-stat-value">$${rd.rate_es ? Number(rd.rate_es).toFixed(2) : '—'}</div>
+          <div class="rate-stat-value">${rd.rate_es ? '$'+Number(rd.rate_es).toFixed(2) : '—'}</div>
         </div>
         <div class="rate-stat">
           <div class="rate-stat-label">EE + Child</div>
-          <div class="rate-stat-value">$${rd.rate_ec ? Number(rd.rate_ec).toFixed(2) : '—'}</div>
+          <div class="rate-stat-value">${rd.rate_ec ? '$'+Number(rd.rate_ec).toFixed(2) : '—'}</div>
         </div>
         <div class="rate-stat">
           <div class="rate-stat-label">Family</div>
-          <div class="rate-stat-value">$${rd.rate_fam ? Number(rd.rate_fam).toFixed(2) : '—'}</div>
+          <div class="rate-stat-value">${rd.rate_fam ? '$'+Number(rd.rate_fam).toFixed(2) : '—'}</div>
         </div>
       </div>
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;font-size:12px;font-weight:500;color:var(--gray-600);padding:6px 0">View benefit details</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;margin-top:6px">
+          ${detailRow('Network', rd.network)}
+          ${detailRow('Deductible (Ind/Fam)', rd.ded_ind ? rd.ded_ind+(rd.ded_fam?' / '+rd.ded_fam:'') : '')}
+          ${detailRow('Coinsurance', rd.coinsurance)}
+          ${detailRow('MOOP (Ind/Fam)', rd.moop_ind ? rd.moop_ind+(rd.moop_fam?' / '+rd.moop_fam:'') : '')}
+          ${detailRow('PCP Copay', rd.pcp)}
+          ${detailRow('Specialist', rd.specialist)}
+          ${detailRow('ER', rd.er)}
+          ${detailRow('Urgent Care', rd.urgent_care)}
+          ${detailRow('Inpatient', rd.inpatient)}
+          ${detailRow('Outpatient Facility', rd.op_facility)}
+          ${detailRow('Lab', rd.lab)}
+          ${detailRow('Imaging', rd.imaging)}
+          ${detailRow('Rx Generic', rd.rx_generic)}
+          ${detailRow('Rx Preferred', rd.rx_preferred)}
+        </div>
+      </details>
+      <div class="hint" style="margin-top:8px;color:var(--accent)">📌 Renewal will appear as the leftmost column in the Excel output for easy comparison.</div>
     </div>`;
   }
 
