@@ -73,9 +73,17 @@ LABEL_MAP = {
     "Deductible":                                       "rx_ded",
     "Generic / Preferred / Non-preferred / Specialty":  "rx_tiers",
     "Single":                                           "rate_ee",
+    "EE Only":                                          "rate_ee",
+    "Employee Only":                                    "rate_ee",
     "Employee + Spouse":                                "rate_es",
+    "EE + Spouse":                                      "rate_es",
     "Employee + Child(ren)":                            "rate_ec",
+    "Employee + Child":                                 "rate_ec",
+    "EE + Child(ren)":                                  "rate_ec",
+    "EE + Child":                                       "rate_ec",
     "Family":                                           "rate_fam",
+    "Employee + Family":                                "rate_fam",
+    "EE + Family":                                      "rate_fam",
     "Rate Guarantee":                                   "notes",
 }
 
