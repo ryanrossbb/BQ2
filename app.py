@@ -241,7 +241,7 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             # If still nothing, just go to end of sheet
             if not last_rate_row:
                 last_rate_row = ws.max_row or 50
-        rr = last_rate_row + 2
+        rr = last_rate_row + 3  # 1 gap row, 1 header row, then renewal data starts
 
         renewal_rows = [
             ("Current Renewal – EE Only", renewal_data.get("rate_ee")),
@@ -272,9 +272,18 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
         for ri, (label, val) in enumerate(renewal_rows):
             r = rr + ri
             set_with_font(r, 3, label, label_font)
+            # Convert val to float safely
+            try:
+                num_val = float(val) if val not in (None, "", 0) else None
+            except (TypeError, ValueError):
+                num_val = None
             for idx, sp in enumerate(selected_plans):
                 col = start_col + idx
-                safe_set(ws, r, col, float(val) if val else "")
+                if num_val is not None:
+                    safe_set(ws, r, col, num_val)
+                    ws.cell(r, col).number_format = '"$"#,##0.00'
+                else:
+                    safe_set(ws, r, col, "")
 
         # Savings rows
         sr = rr + len(renewal_rows) + 1
