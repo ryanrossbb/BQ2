@@ -300,13 +300,17 @@
 // ─── STATE ───────────────────────────────────────────────────────────────────
 const S = {
   authed: false,
-  view: 'dashboard', // 'dashboard' | 'group'
+  view: 'dashboard', // 'dashboard' | 'group' | 'templates'
   step: 0,
-  files: [], // current group's PDFs being processed
+  files: [],
   clientName: "",
+  quoteType: "single",  // "single" | "double" | "triple"
   carriers: [],
   renewalData: null,
+  // For Single: selectedPlanIds is a Set of "ci-pi"
+  // For Double/Triple: bundleSelections is { carrierIdx: [planIdx, planIdx, ...] }
   selectedPlanIds: new Set(),
+  bundleSelections: {},  // { ci: [pi, pi, ...] } where length must match bundleSize
   filter: "all",
   sort: "carrier",
   // Multi-group session
@@ -451,6 +455,8 @@ async function loadTemplateList() {
 function renderTemplateRows() {
   const el = document.getElementById('templates-body');
   if (!el) return;
+  const labels = { single: 'Single Plan', double: 'Double Plan', triple: 'Triple Plan' };
+  const icons  = { single: '1️⃣', double: '2️⃣', triple: '3️⃣' };
   el.innerHTML = _templateList.map(t => {
     const status = t.available
       ? `<span style="color:var(--green);font-weight:600;font-size:12px">✓ Loaded</span>`
@@ -460,41 +466,41 @@ function renderTemplateRows() {
       : '';
     return `
     <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-sm);margin-bottom:8px">
-      <div style="font-size:24px;width:42px;height:42px;background:var(--gray-100);border-radius:8px;display:flex;align-items:center;justify-content:center">📊</div>
+      <div style="font-size:24px;width:42px;height:42px;background:var(--gray-100);border-radius:8px;display:flex;align-items:center;justify-content:center">${icons[t.type]||'📊'}</div>
       <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">${t.size}-Plan Template</div>
+        <div style="font-weight:600;font-size:14px">${labels[t.type]||t.type} Template</div>
         <div style="font-size:12px;color:var(--gray-500);margin-top:2px">${status}</div>
         ${meta}
       </div>
-      <input type="file" id="tpl-input-${t.size}" accept=".xlsx,.xls" style="display:none" onchange="uploadTemplate(${t.size}, this.files[0])">
-      <button class="btn btn-ghost" onclick="document.getElementById('tpl-input-${t.size}').click()">${t.available?'Replace':'Upload'}</button>
-      ${t.available ? `<a href="/api/templates/${t.size}/download" class="btn btn-ghost" download>Download</a>` : ''}
-      ${t.available ? `<button class="btn btn-ghost" onclick="deleteTemplate(${t.size})" style="color:var(--red)">Remove</button>` : ''}
+      <input type="file" id="tpl-input-${t.type}" accept=".xlsx,.xls" style="display:none" onchange="uploadTemplate('${t.type}', this.files[0])">
+      <button class="btn btn-ghost" onclick="document.getElementById('tpl-input-${t.type}').click()">${t.available?'Replace':'Upload'}</button>
+      ${t.available ? `<a href="/api/templates/${t.type}/download" class="btn btn-ghost" download>Download</a>` : ''}
+      ${t.available ? `<button class="btn btn-ghost" onclick="deleteTemplate('${t.type}')" style="color:var(--red)">Remove</button>` : ''}
     </div>`;
   }).join('');
 }
 
-async function uploadTemplate(size, file) {
+async function uploadTemplate(type, file) {
   if (!file) return;
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const r = await fetch(`/api/templates/${size}`, {method: 'POST', body: fd});
+    const r = await fetch(`/api/templates/${type}`, {method: 'POST', body: fd});
     if (!r.ok) {
       const d = await r.json().catch(()=>({}));
       throw new Error(d.error?.message || 'Upload failed');
     }
-    set({info: `${size}-plan template uploaded.`});
+    set({info: `${type} template uploaded.`});
     loadTemplateList();
   } catch (e) {
     set({error: 'Upload failed: ' + e.message});
   }
 }
 
-async function deleteTemplate(size) {
-  if (!confirm(`Remove the ${size}-plan template?`)) return;
+async function deleteTemplate(type) {
+  if (!confirm(`Remove the ${type} template?`)) return;
   try {
-    const r = await fetch(`/api/templates/${size}`, {method: 'DELETE'});
+    const r = await fetch(`/api/templates/${type}`, {method: 'DELETE'});
     if (!r.ok) throw new Error('Delete failed');
     loadTemplateList();
   } catch (e) {
@@ -515,9 +521,9 @@ function viewTemplates() {
   <div class="card" style="margin-bottom:1rem">
     <div class="card-title"><span class="card-title-emoji">💡</span> How it works</div>
     <div style="font-size:13px;color:var(--gray-600);line-height:1.6">
-      Upload one .xlsx template per plan count (1, 2, or 3 plans). When you generate Excel for a group, the app automatically picks the template that matches the number of plans you selected. If you select more than 3, it uses the 3-plan template and any extra plans go into added columns.
+      Upload one .xlsx template per quote type. The Single template is used for one-plan-per-carrier comparisons. The Double template is for two-plan bundles. The Triple template is for three-plan bundles.
       <br><br>
-      <strong>What makes a valid template:</strong> column C contains the labels ("Network Availability", "Single", "EE Only", etc.) and there's a row with "Plan 1", "Plan 2"... text marking where plan data should be written.
+      <strong>How they're used:</strong> Each group is tagged as Single, Double, or Triple in the upload step. The matching template is used to generate the Excel. Templates must have "Plan 1" / "Plan 2" placeholders and a row with carrier names that the app can find.
     </div>
   </div>
 
@@ -555,9 +561,10 @@ function viewDashboard() {
       <div class="group-card-info">
         <div class="group-card-name">${escHtml(g.clientName)}<span class="group-card-status ${g.ready?'ready':'draft'}">${g.ready?'Ready':'Draft'}</span></div>
         <div class="group-card-meta">
+          <span style="display:inline-block;padding:1px 8px;background:var(--primary-pale);color:var(--primary);border-radius:10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:6px">${g.quoteType||'single'}</span>
           ${g.carriers ? `${g.carriers.length} carrier${g.carriers.length!==1?'s':''} · ` : ''}
           ${g.selectedCount || 0} plan${(g.selectedCount||0)!==1?'s':''} selected
-          ${g.renewalData ? ' · 🔄 Renewal included' : ''}
+          ${g.renewalData ? ' · 🔄 Renewal' : ''}
         </div>
       </div>
       <div class="group-card-actions">
@@ -576,6 +583,8 @@ function startNewGroup() {
     step: 0,
     files: [],
     clientName: '',
+    quoteType: 'single',
+    bundleSelections: {},
     carriers: [],
     renewalData: null,
     selectedPlanIds: new Set(),
@@ -595,8 +604,10 @@ function editGroup(id) {
   if (!g) return;
   Object.assign(S, {
     view: 'group',
-    step: 3,  // jump to selection
+    step: 3,
     clientName: g.clientName,
+    quoteType: g.quoteType || 'single',
+    bundleSelections: JSON.parse(JSON.stringify(g.bundleSelections || {})),
     carriers: g.carriers || [],
     renewalData: g.renewalData,
     selectedPlanIds: new Set(g.selectedPlanIdsList || []),
@@ -634,24 +645,65 @@ async function exportAllGroups() {
 
 async function downloadExcelForGroup(g) {
   try {
-    const allPlans = (g.carriers || []).flatMap((c, ci) =>
-      (c.plans || []).map((p, pi) => ({ id: `${ci}-${pi}`, ci, pi, carrier: c.carrier || 'Unknown', plan: p }))
-    );
-    const idSet = new Set(g.selectedPlanIdsList || []);
-    const selected = allPlans
-      .filter(p => idSet.has(p.id))
-      .map(p => {
-        const edits = (S.previewEdits[g.id] || {})[p.id] || {};
-        return { carrier: edits._carrier || p.carrier, plan: { ...p.plan, ...edits } };
+    const editsForGroup = S.previewEdits[g.id] || {};
+
+    // Build bundles grouped by carrier, in carrier-display order
+    const bundles = [];
+    const bs = ({single:1,double:2,triple:3})[g.quoteType||'single'] || 1;
+
+    if (bs === 1) {
+      // Single: each selected plan becomes its own bundle of size 1
+      const idSet = new Set(g.selectedPlanIdsList || []);
+      (g.carriers || []).forEach((c, ci) => {
+        (c.plans || []).forEach((p, pi) => {
+          const id = `${ci}-${pi}`;
+          if (idSet.has(id)) {
+            const edits = editsForGroup[id] || {};
+            bundles.push({
+              carrier: edits._carrier || c.carrier || 'Unknown',
+              plans: [{ ...p, ...edits }]
+            });
+          }
+        });
       });
+    } else {
+      // Double/Triple: each carrier with selections becomes one bundle
+      const sel = g.bundleSelections || {};
+      Object.keys(sel).map(Number).sort((a,b)=>a-b).forEach(ci => {
+        const c = g.carriers[ci];
+        if (!c) return;
+        const planIdxs = sel[ci] || [];
+        const plansInBundle = planIdxs.map(pi => {
+          const id = `${ci}-${pi}`;
+          const edits = editsForGroup[id] || {};
+          return { ...c.plans[pi], ...edits };
+        });
+        bundles.push({ carrier: c.carrier || 'Unknown', plans: plansInBundle });
+      });
+    }
+
+    // Renewal: wrap as a bundle
+    let renewalBundle = null;
+    if (g.renewalData) {
+      const r = g.renewalData;
+      const renewalPlans = [r];
+      // For Double/Triple, we don't have multiple renewal plans, so pad with empty
+      while (renewalPlans.length < bs) renewalPlans.push({});
+      renewalBundle = {
+        carrier: r.carrier || 'Current Renewal',
+        plans: renewalPlans
+      };
+    }
 
     const resp = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        selectedPlans: selected,
+        quoteType: g.quoteType || 'single',
+        selectedBundles: bundles,
+        renewalBundle: renewalBundle,
         clientName: g.clientName,
-        renewalData: g.renewalData
+        census: g.census || null
       })
     });
     if (!resp.ok) {
@@ -708,6 +760,24 @@ function viewUpload() {
 
   <div class="card">
     <div class="card-title"><span class="card-title-emoji">👤</span> Group Details</div>
+    <div style="margin-bottom:14px">
+      <label class="field-label">Quote Type</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${[
+          {v:'single', icon:'1️⃣', label:'Single Plan',  desc:'One plan per carrier'},
+          {v:'double', icon:'2️⃣', label:'Double Plan',  desc:'Two plans bundled per carrier'},
+          {v:'triple', icon:'3️⃣', label:'Triple Plan',  desc:'Three plans bundled per carrier'},
+        ].map(qt => `
+          <label style="flex:1;min-width:170px;display:flex;gap:8px;align-items:flex-start;padding:11px 14px;background:${S.quoteType===qt.v?'var(--primary-pale)':'var(--gray-50)'};border:1.5px solid ${S.quoteType===qt.v?'var(--primary)':'var(--gray-200)'};border-radius:var(--radius-sm);cursor:pointer;transition:all 0.12s">
+            <input type="radio" name="qt" value="${qt.v}" ${S.quoteType===qt.v?'checked':''} onchange="S.quoteType='${qt.v}';render()" style="margin-top:2px;cursor:pointer;accent-color:var(--primary)">
+            <div>
+              <div style="font-weight:500;font-size:13px;color:var(--gray-900)">${qt.icon} ${qt.label}</div>
+              <div style="font-size:11px;color:var(--gray-500);margin-top:2px">${qt.desc}</div>
+            </div>
+          </label>
+        `).join('')}
+      </div>
+    </div>
     <div style="display:flex;gap:1rem;align-items:flex-end">
       <div style="flex:1">
         <label class="field-label">Client Group Name</label>
@@ -1215,6 +1285,10 @@ function viewSelect() {
   });
 
   const selectedCount = S.selectedPlanIds.size;
+  const bs = bundleSize();
+  const bundlesIncomplete = bs > 1 && Object.entries(S.bundleSelections).some(([ci, pis]) => pis.length !== bs);
+  const noBundles = bs > 1 && Object.keys(S.bundleSelections).length === 0;
+  const canContinue = bs === 1 ? selectedCount > 0 : !bundlesIncomplete && !noBundles;
 
   // Renewal info card
   let renewalCard = '';
@@ -1273,7 +1347,7 @@ function viewSelect() {
       </div>
       <div class="spacer"></div>
       <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Go Back</button>
-      <button class="btn btn-accent" onclick="set({step:4})" ${selectedCount === 0 ? 'disabled' : ''}>Preview & Verify →</button>
+      <button class="btn btn-accent" onclick="set({step:4})" ${!canContinue ? 'disabled' : ''} title="${bundlesIncomplete?'Some carriers have wrong number of plans selected':''}">Preview & Verify →</button>
     </div>
   </div>
 
@@ -1341,7 +1415,7 @@ function viewSelect() {
 
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
     <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Go Back</button>
-    <button class="btn btn-accent" onclick="set({step:4})" ${selectedCount === 0 ? 'disabled' : ''}>Preview & Verify → (${selectedCount} selected)</button>
+    <button class="btn btn-accent" onclick="set({step:4})" ${!canContinue ? 'disabled' : ''}>Preview & Verify → (${selectedCount} selected)</button>
   </div>`;
 }
 
@@ -1354,18 +1428,72 @@ function renderSavings(pct) {
   return `<td class="col-savings"><span class="${cls}">${sign}${pct.toFixed(1)}%</span></td>`;
 }
 
+function bundleSize() {
+  return ({single:1, double:2, triple:3})[S.quoteType] || 1;
+}
+
 function togglePlan(id) {
-  if (S.selectedPlanIds.has(id)) S.selectedPlanIds.delete(id);
-  else S.selectedPlanIds.add(id);
+  // For Single: simple toggle. For Double/Triple: enforce per-carrier bundle limit.
+  const [ci, pi] = id.split('-').map(Number);
+  const bs = bundleSize();
+  if (bs === 1) {
+    if (S.selectedPlanIds.has(id)) S.selectedPlanIds.delete(id);
+    else S.selectedPlanIds.add(id);
+  } else {
+    if (!S.bundleSelections[ci]) S.bundleSelections[ci] = [];
+    const sel = S.bundleSelections[ci];
+    const idx = sel.indexOf(pi);
+    if (idx >= 0) {
+      sel.splice(idx, 1);
+    } else {
+      if (sel.length >= bs) {
+        // Replace oldest pick
+        sel.shift();
+      }
+      sel.push(pi);
+    }
+    if (sel.length === 0) delete S.bundleSelections[ci];
+    // Also keep selectedPlanIds in sync for the preview/savings display
+    S.selectedPlanIds = new Set();
+    Object.entries(S.bundleSelections).forEach(([ci, pis]) => {
+      pis.forEach(pi => S.selectedPlanIds.add(`${ci}-${pi}`));
+    });
+  }
   render();
 }
 
+function isPlanSelected(id) {
+  const [ci, pi] = id.split('-').map(Number);
+  if (bundleSize() === 1) return S.selectedPlanIds.has(id);
+  return (S.bundleSelections[ci] || []).includes(pi);
+}
+
+function carrierBundleStatus(ci) {
+  const bs = bundleSize();
+  if (bs === 1) return null;
+  const count = (S.bundleSelections[ci] || []).length;
+  return { count, needed: bs, complete: count === bs };
+}
+
 function selectAll() {
-  getAllPlans().forEach(p => S.selectedPlanIds.add(p.id));
+  if (bundleSize() === 1) {
+    getAllPlans().forEach(p => S.selectedPlanIds.add(p.id));
+  } else {
+    // Auto-pick first N plans per carrier
+    const bs = bundleSize();
+    S.carriers.forEach((c, ci) => {
+      S.bundleSelections[ci] = (c.plans || []).slice(0, bs).map((_, pi) => pi);
+    });
+    S.selectedPlanIds = new Set();
+    Object.entries(S.bundleSelections).forEach(([ci, pis]) => {
+      pis.forEach(pi => S.selectedPlanIds.add(`${ci}-${pi}`));
+    });
+  }
   render();
 }
 function clearSelection() {
   S.selectedPlanIds.clear();
+  S.bundleSelections = {};
   render();
 }
 
@@ -1630,9 +1758,11 @@ function saveGroupAndContinue() {
   const groupData = {
     id,
     clientName: S.clientName,
+    quoteType: S.quoteType,
     carriers: finalCarriers,
     renewalData: S.renewalData,
     selectedPlanIdsList: Array.from(S.selectedPlanIds),
+    bundleSelections: JSON.parse(JSON.stringify(S.bundleSelections || {})),
     selectedCount: S.selectedPlanIds.size,
     ready: true
   };
@@ -1679,7 +1809,7 @@ function viewComplete() {
 function resetApp() {
   Object.assign(S, {
     view: 'dashboard',
-    step: 0, files: [], clientName: "",
+    step: 0, files: [], clientName: "", quoteType: 'single', bundleSelections: {},
     carriers: [], renewalData: null, selectedPlanIds: new Set(),
     editingGroupId: null,
     filter: "all", sort: "carrier", error: "", warn: "", info: ""
