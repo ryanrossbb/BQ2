@@ -302,7 +302,6 @@ const S = {
   authed: false,
   view: 'dashboard', // 'dashboard' | 'group'
   step: 0,
-  templateFile: null,
   files: [], // current group's PDFs being processed
   clientName: "",
   carriers: [],
@@ -408,6 +407,10 @@ function render() {
   if (S.view === 'dashboard') {
     stepsEl.style.display = 'none';
     viewEl.innerHTML = viewDashboard();
+  } else if (S.view === 'templates') {
+    stepsEl.style.display = 'none';
+    viewEl.innerHTML = viewTemplates();
+    setTimeout(loadTemplateList, 0);
   } else {
     stepsEl.style.display = 'flex';
     stepsEl.innerHTML = STEPS.map((s, i) => {
@@ -429,6 +432,100 @@ function render() {
   attachDropEvents();
 }
 
+// ─── TEMPLATE LIBRARY MANAGEMENT ─────────────────────────────────────────────
+let _templateList = [];
+
+async function loadTemplateList() {
+  try {
+    const r = await fetch('/api/templates');
+    if (!r.ok) throw new Error('Failed to load');
+    const data = await r.json();
+    _templateList = data.templates || [];
+    renderTemplateRows();
+  } catch (e) {
+    const el = document.getElementById('templates-body');
+    if (el) el.innerHTML = '<div class="alert alert-error">Failed to load: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function renderTemplateRows() {
+  const el = document.getElementById('templates-body');
+  if (!el) return;
+  el.innerHTML = _templateList.map(t => {
+    const status = t.available
+      ? `<span style="color:var(--green);font-weight:600;font-size:12px">✓ Loaded</span>`
+      : `<span style="color:var(--red);font-weight:600;font-size:12px">⚠ Not uploaded</span>`;
+    const meta = t.available && t.modifiedAt
+      ? `<div style="font-size:11px;color:var(--gray-500);margin-top:2px">Updated ${new Date(t.modifiedAt * 1000).toLocaleDateString()} · ${(t.sizeBytes/1024).toFixed(1)} KB</div>`
+      : '';
+    return `
+    <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:white;border:1px solid var(--gray-200);border-radius:var(--radius-sm);margin-bottom:8px">
+      <div style="font-size:24px;width:42px;height:42px;background:var(--gray-100);border-radius:8px;display:flex;align-items:center;justify-content:center">📊</div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">${t.size}-Plan Template</div>
+        <div style="font-size:12px;color:var(--gray-500);margin-top:2px">${status}</div>
+        ${meta}
+      </div>
+      <input type="file" id="tpl-input-${t.size}" accept=".xlsx,.xls" style="display:none" onchange="uploadTemplate(${t.size}, this.files[0])">
+      <button class="btn btn-ghost" onclick="document.getElementById('tpl-input-${t.size}').click()">${t.available?'Replace':'Upload'}</button>
+      ${t.available ? `<a href="/api/templates/${t.size}/download" class="btn btn-ghost" download>Download</a>` : ''}
+      ${t.available ? `<button class="btn btn-ghost" onclick="deleteTemplate(${t.size})" style="color:var(--red)">Remove</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function uploadTemplate(size, file) {
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch(`/api/templates/${size}`, {method: 'POST', body: fd});
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.error?.message || 'Upload failed');
+    }
+    set({info: `${size}-plan template uploaded.`});
+    loadTemplateList();
+  } catch (e) {
+    set({error: 'Upload failed: ' + e.message});
+  }
+}
+
+async function deleteTemplate(size) {
+  if (!confirm(`Remove the ${size}-plan template?`)) return;
+  try {
+    const r = await fetch(`/api/templates/${size}`, {method: 'DELETE'});
+    if (!r.ok) throw new Error('Delete failed');
+    loadTemplateList();
+  } catch (e) {
+    set({error: 'Delete failed: ' + e.message});
+  }
+}
+
+function viewTemplates() {
+  return `
+  <div class="dash-header">
+    <div style="flex:1">
+      <div class="dash-title">📋 Manage Templates</div>
+      <div class="dash-sub">Upload your branded Excel templates. The app picks the right one based on plan count.</div>
+    </div>
+    <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Dashboard</button>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-title"><span class="card-title-emoji">💡</span> How it works</div>
+    <div style="font-size:13px;color:var(--gray-600);line-height:1.6">
+      Upload one .xlsx template per plan count (1, 2, or 3 plans). When you generate Excel for a group, the app automatically picks the template that matches the number of plans you selected. If you select more than 3, it uses the 3-plan template and any extra plans go into added columns.
+      <br><br>
+      <strong>What makes a valid template:</strong> column C contains the labels ("Network Availability", "Single", "EE Only", etc.) and there's a row with "Plan 1", "Plan 2"... text marking where plan data should be written.
+    </div>
+  </div>
+
+  <div id="templates-body">
+    <div class="hint" style="text-align:center;padding:2rem">Loading templates...</div>
+  </div>`;
+}
+
 // ─── DASHBOARD: MULTI-GROUP HOME ─────────────────────────────────────────────
 function viewDashboard() {
   const groups = S.groups;
@@ -440,6 +537,7 @@ function viewDashboard() {
       <div class="dash-title">Your Quote Comparisons</div>
       <div class="dash-sub">${groups.length === 0 ? 'Add your first group to get started.' : `${groups.length} group${groups.length!==1?'s':''} in this session · ${readyCount} ready to export`}</div>
     </div>
+    <button class="btn btn-ghost" onclick="set({view:'templates'})" title="Manage Excel templates">📋 Manage Templates</button>
     <button class="btn btn-primary" onclick="startNewGroup()">+ Add Group</button>
     ${readyCount > 0 ? `<button class="btn btn-accent" onclick="exportAllGroups()">Export All (${readyCount}) ↓</button>` : ''}
   </div>
@@ -476,7 +574,6 @@ function startNewGroup() {
   Object.assign(S, {
     view: 'group',
     step: 0,
-    templateFile: null,
     files: [],
     clientName: '',
     carriers: [],
@@ -499,7 +596,6 @@ function editGroup(id) {
   Object.assign(S, {
     view: 'group',
     step: 3,  // jump to selection
-    templateFile: g.templateFile,
     clientName: g.clientName,
     carriers: g.carriers || [],
     renewalData: g.renewalData,
@@ -537,9 +633,7 @@ async function exportAllGroups() {
 }
 
 async function downloadExcelForGroup(g) {
-  if (!g.templateFile) return set({ error: 'Template missing for this group' });
   try {
-    const templateB64 = await fileToBase64(g.templateFile);
     const allPlans = (g.carriers || []).flatMap((c, ci) =>
       (c.plans || []).map((p, pi) => ({ id: `${ci}-${pi}`, ci, pi, carrier: c.carrier || 'Unknown', plan: p }))
     );
@@ -547,7 +641,6 @@ async function downloadExcelForGroup(g) {
     const selected = allPlans
       .filter(p => idSet.has(p.id))
       .map(p => {
-        // Apply preview edits if any
         const edits = (S.previewEdits[g.id] || {})[p.id] || {};
         return { carrier: edits._carrier || p.carrier, plan: { ...p.plan, ...edits } };
       });
@@ -556,7 +649,6 @@ async function downloadExcelForGroup(g) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        template: templateB64,
         selectedPlans: selected,
         clientName: g.clientName,
         renewalData: g.renewalData
@@ -580,30 +672,18 @@ async function downloadExcelForGroup(g) {
 
 // ─── STEP 0: UPLOAD ──────────────────────────────────────────────────────────
 function viewUpload() {
-  const hasTmpl = !!S.templateFile;
   const hasFiles = S.files.length > 0;
   const hasRenewal = S.files.some(f => f.role === 'renewal');
   const hasCarrier = S.files.some(f => f.role === 'carrier');
 
   return `
-  <div class="grid-2" style="margin-bottom:1rem">
-    <div class="card">
-      <div class="card-title"><span class="card-title-emoji">📊</span> Excel Template</div>
-      <div class="drop-zone ${hasTmpl ? 'filled' : ''}" id="dz-tmpl" onclick="document.getElementById('fi-tmpl').click()">
-        <input type="file" id="fi-tmpl" accept=".xlsx,.xls" style="display:none" onchange="onTemplateFile(event)">
-        <div class="drop-icon">${hasTmpl ? '✅' : '📋'}</div>
-        <div class="drop-title">${hasTmpl ? S.templateFile.name : 'Drop branded Excel template'}</div>
-        <div class="drop-sub">${hasTmpl ? 'Click to replace' : 'or click to browse (.xlsx)'}</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title"><span class="card-title-emoji">📄</span> Quote Documents</div>
-      <div class="drop-zone ${hasFiles ? 'filled' : ''}" id="dz-pdfs" onclick="document.getElementById('fi-pdfs').click()">
-        <input type="file" id="fi-pdfs" accept=".pdf" multiple style="display:none" onchange="onPDFFiles(event)">
-        <div class="drop-icon">📥</div>
-        <div class="drop-title">${hasFiles ? 'Add more documents' : 'Drop PDFs here'}</div>
-        <div class="drop-sub">All PDFs first, then tag them below</div>
-      </div>
+  <div class="card" style="margin-bottom:1rem">
+    <div class="card-title"><span class="card-title-emoji">📄</span> Quote Documents</div>
+    <div class="drop-zone ${hasFiles ? 'filled' : ''}" id="dz-pdfs" onclick="document.getElementById('fi-pdfs').click()">
+      <input type="file" id="fi-pdfs" accept=".pdf" multiple style="display:none" onchange="onPDFFiles(event)">
+      <div class="drop-icon">📥</div>
+      <div class="drop-title">${hasFiles ? 'Add more documents' : 'Drop PDFs here'}</div>
+      <div class="drop-sub">All PDFs together — tag the renewal vs carrier quotes below</div>
     </div>
   </div>
 
@@ -652,11 +732,6 @@ function updateGoBtn() {
     if (!S.clientName.trim()) h += "✏️ Enter the client group name.";
     hints.textContent = h;
   }
-}
-
-function onTemplateFile(e) {
-  const f = e.target.files[0];
-  if (f) { S.templateFile = f; render(); updateGoBtn(); }
 }
 
 function onPDFFiles(e) {
@@ -1549,7 +1624,6 @@ function saveGroupAndContinue() {
   const groupData = {
     id,
     clientName: S.clientName,
-    templateFile: S.templateFile,
     carriers: finalCarriers,
     renewalData: S.renewalData,
     selectedPlanIdsList: Array.from(S.selectedPlanIds),
@@ -1575,7 +1649,6 @@ function saveGroupAndContinue() {
   Object.assign(S, {
     view: 'dashboard',
     step: 0,
-    templateFile: null,
     files: [],
     clientName: '',
     carriers: [],
@@ -1600,7 +1673,7 @@ function viewComplete() {
 function resetApp() {
   Object.assign(S, {
     view: 'dashboard',
-    step: 0, templateFile: null, files: [], clientName: "",
+    step: 0, files: [], clientName: "",
     carriers: [], renewalData: null, selectedPlanIds: new Set(),
     editingGroupId: null,
     filter: "all", sort: "carrier", error: "", warn: "", info: ""
@@ -1629,36 +1702,30 @@ function escHtml(s) {
 }
 
 function attachDropEvents() {
-  ["dz-tmpl", "dz-pdfs"].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
+  const el = document.getElementById("dz-pdfs");
+  if (el) {
     el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("over"); });
     el.addEventListener("dragleave", () => el.classList.remove("over"));
     el.addEventListener("drop", e => {
       e.preventDefault();
       el.classList.remove("over");
       const files = Array.from(e.dataTransfer.files);
-      if (id === "dz-tmpl") {
-        const f = files.find(f => f.name.match(/\.xlsx?$/i));
-        if (f) { S.templateFile = f; render(); updateGoBtn(); }
-      } else {
-        const pdfs = files.filter(f => f.name.match(/\.pdf$/i));
-        if (pdfs.length) {
-          const newFiles = pdfs.map(file => ({
-            file, role: detectRole(file.name), pageRange: '', pageCount: null,
-            status: 'idle', data: null, error: null
-          }));
-          S.files = [...S.files, ...newFiles];
-          render();
-          updateGoBtn();
-          newFiles.forEach((f) => {
-            const idx = S.files.indexOf(f);
-            loadPageCount(f.file).then(c => { S.files[idx].pageCount = c; if (S.step === 1) render(); });
-          });
-        }
+      const pdfs = files.filter(f => f.name.match(/\.pdf$/i));
+      if (pdfs.length) {
+        const newFiles = pdfs.map(file => ({
+          file, role: detectRole(file.name), pageRange: '', pageCount: null,
+          status: 'idle', data: null, error: null
+        }));
+        S.files = [...S.files, ...newFiles];
+        render();
+        updateGoBtn();
+        newFiles.forEach((f) => {
+          const idx = S.files.indexOf(f);
+          loadPageCount(f.file).then(c => { S.files[idx].pageCount = c; if (S.step === 1) render(); });
+        });
       }
     });
-  });
+  }
 }
 
 checkAuth();
