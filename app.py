@@ -175,11 +175,24 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
     if not selected_plans:
         raise ValueError("No plans selected for output.")
 
+    # Prepend renewal as leftmost column if provided
+    if renewal_data:
+        renewal_plan_dict = {k: v for k, v in renewal_data.items() if k != "carrier"}
+        if not renewal_plan_dict.get("plan_name"):
+            renewal_plan_dict["plan_name"] = "Current Plan"
+        selected_plans = [{
+            "carrier": renewal_data.get("carrier") or "Current Renewal",
+            "plan": renewal_plan_dict,
+            "_is_renewal": True
+        }] + list(selected_plans)
+
     # 3. Write benefit data column-by-column
     tmpl_col = start_col
+    RENEWAL_FILL = PatternFill("solid", fgColor="FFF8E1")  # soft amber for renewal column
     for idx, sp in enumerate(selected_plans):
         col = start_col + idx
         plan = sp["plan"]
+        is_renewal = sp.get("_is_renewal", False)
 
         # Copy column width
         if idx > 0:
@@ -191,6 +204,8 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if idx > 0:
                 copy_cell_style(ws.cell(plan_row, tmpl_col), ws.cell(plan_row, col))
             safe_set(ws, plan_row, col, plan.get("plan_name") or "")
+            if is_renewal:
+                ws.cell(plan_row, col).fill = RENEWAL_FILL
 
         # Benefit rows
         for field_key, row in row_map.items():
@@ -200,6 +215,8 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if idx > 0:
                 copy_cell_style(ws.cell(row, tmpl_col), ws.cell(row, col))
             safe_set(ws, row, col, value)
+            if is_renewal:
+                ws.cell(row, col).fill = RENEWAL_FILL
 
     # 4. Write carrier names with proper merged cells per carrier group
     if carrier_row > 0:
@@ -228,90 +245,6 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if last_col > first_col:
                 ws.merge_cells(start_row=carrier_row, start_column=first_col,
                               end_row=carrier_row, end_column=last_col)
-
-    # 5. Write renewal rows below rates
-    if renewal_data:
-        # Find a starting row for renewal section
-        rate_rows = [row_map.get(k) for k in ("rate_ee", "rate_es", "rate_ec", "rate_fam") if row_map.get(k)]
-        if rate_rows:
-            last_rate_row = max(rate_rows)
-        else:
-            # No rate rows found - put renewal at end of data
-            last_rate_row = max((r for r in row_map.values()), default=ws.max_row)
-            # If still nothing, just go to end of sheet
-            if not last_rate_row:
-                last_rate_row = ws.max_row or 50
-        rr = last_rate_row + 3  # 1 gap row, 1 header row, then renewal data starts
-
-        renewal_rows = [
-            ("Current Renewal – EE Only", renewal_data.get("rate_ee")),
-            ("Current Renewal – EE+Spouse", renewal_data.get("rate_es")),
-            ("Current Renewal – EE+Child(ren)", renewal_data.get("rate_ec")),
-            ("Current Renewal – Family", renewal_data.get("rate_fam")),
-        ]
-
-        def set_with_font(row, col, value, font=None):
-            safe_set(ws, row, col, value)
-            if font:
-                ws.cell(row, col).font = font
-
-        label_font = Font(bold=True, size=10, color="666666")
-        savings_font = Font(bold=True, size=10, color="166534")
-
-        # Write a section header
-        header_font = Font(bold=True, size=11, color="FFFFFF")
-        header_fill = PatternFill("solid", fgColor="1E4076")
-        safe_set(ws, rr - 1, 3, "CURRENT RENEWAL COMPARISON")
-        ws.cell(rr - 1, 3).font = header_font
-        ws.cell(rr - 1, 3).fill = header_fill
-        # Apply same styling across the data columns
-        for idx, sp in enumerate(selected_plans):
-            col = start_col + idx
-            ws.cell(rr - 1, col).fill = header_fill
-
-        for ri, (label, val) in enumerate(renewal_rows):
-            r = rr + ri
-            set_with_font(r, 3, label, label_font)
-            # Convert val to float safely
-            try:
-                num_val = float(val) if val not in (None, "", 0) else None
-            except (TypeError, ValueError):
-                num_val = None
-            for idx, sp in enumerate(selected_plans):
-                col = start_col + idx
-                if num_val is not None:
-                    safe_set(ws, r, col, num_val)
-                    ws.cell(r, col).number_format = '"$"#,##0.00'
-                else:
-                    safe_set(ws, r, col, "")
-
-        # Savings rows
-        sr = rr + len(renewal_rows) + 1
-        savings_labels = [
-            "EE Savings vs Renewal ($)",
-            "EE Savings vs Renewal (%)",
-            "Family Savings vs Renewal ($)",
-            "Family Savings vs Renewal (%)",
-        ]
-        for i, label in enumerate(savings_labels):
-            set_with_font(sr + i, 3, label, savings_font)
-
-        ren_ee = float(renewal_data.get("rate_ee") or 0)
-        ren_fam = float(renewal_data.get("rate_fam") or 0)
-
-        for idx, sp in enumerate(selected_plans):
-            col = start_col + idx
-            try:
-                p_ee = float(sp["plan"].get("rate_ee") or 0)
-                p_fam = float(sp["plan"].get("rate_fam") or 0)
-                if p_ee and ren_ee:
-                    safe_set(ws, sr, col, round(ren_ee - p_ee, 2))
-                    safe_set(ws, sr + 1, col, f"{round((ren_ee - p_ee) / ren_ee * 100, 1)}%")
-                if p_fam and ren_fam:
-                    safe_set(ws, sr + 2, col, round(ren_fam - p_fam, 2))
-                    safe_set(ws, sr + 3, col, f"{round((ren_fam - p_fam) / ren_fam * 100, 1)}%")
-            except (TypeError, ValueError):
-                pass
 
     buf = io.BytesIO()
     wb.save(buf)
