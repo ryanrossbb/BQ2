@@ -565,7 +565,23 @@ async function startExtraction() {
       const isRenewal = f.role === 'renewal';
       const schema = isRenewal ? RENEWAL_SCHEMA : CARRIER_SCHEMA;
       const prompt = isRenewal
-        ? `Extract the current renewal plan from this insurance contract PDF, including all benefit details (deductible, copays, coinsurance, MOOP, Rx tiers) AND rates. Return ONLY one plan in the plans array. Be concise. Return JSON matching this schema exactly: ${schema}`
+        ? `This is a current health insurance renewal document. Find the SINGLE renewal/proposed plan (NOT alternative plans being offered). Extract ALL benefit details and rates from the renewal plan section.
+
+CRITICAL: This PDF may show one renewal plan PLUS many alternatives in a multi-plan exhibit table. ONLY extract the renewal/proposed plan, ignore the alternatives.
+
+For the renewal plan, extract:
+- carrier name (e.g. "ACEC Life/Health Trust", "UnitedHealthcare")
+- plan_name (the plan code/name like "EHI6 PROformance")
+- network info
+- Deductible (in-network individual / family)
+- MOOP (out-of-pocket max in-network individual / family)
+- Coinsurance percentage
+- Office copays (PCP, Specialist, Urgent Care, ER, Inpatient)
+- Pharmacy/Rx tier copays (Generic, Preferred Brand, Non-Preferred, Specialty)
+- All four rate tiers (Employee Only, Employee + Spouse, Employee + Child(ren), Family)
+- Out-of-network deductible, coinsurance, MOOP
+
+Return JSON in plans array with ONE plan object. Schema: ${schema}`
         : `Extract all medical plans from this carrier quote PDF. Be concise. Return JSON matching this schema exactly: ${schema}`;
 
       const body = {
@@ -583,6 +599,9 @@ async function startExtraction() {
       };
       if (f.pageRange && f.pageRange.trim() && f.pageRange.trim().toLowerCase() !== 'all') {
         body._pageRange = f.pageRange;
+      } else if (isRenewal && f.pageCount && f.pageCount > 2) {
+        // Auto-limit renewal extraction to first 2 pages to avoid confusion from multi-plan exhibits
+        body._pageRange = '1-2';
       }
 
       const resp = await fetch("/api/extract", {
