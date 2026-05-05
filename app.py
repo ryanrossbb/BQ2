@@ -1,17 +1,19 @@
 """
-Medical Benefits Comparison — v3
-A clean rebuild for ingesting carrier quotes + renewal contract,
-selecting which plans to present, and generating a branded Excel.
+Medical Benefits Comparison — v4
+Phase 1: password auth, server-stored API key, multi-group sessions,
+spreadsheet preview, single-sheet output.
 """
 
 import os
 import io
 import json
 import base64
+import secrets
 import urllib.request
 import urllib.error
+from functools import wraps
 
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, session, redirect
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
@@ -23,7 +25,19 @@ except ImportError:
     PYPDF_OK = False
 
 app = Flask(__name__, static_folder="static")
+app.secret_key = os.environ.get("FLASK_SECRET", secrets.token_hex(32))
 
+# ─── CONFIG ───────────────────────────────────────────────────────────────────
+APP_PASSWORD   = os.environ.get("APP_PASSWORD", "changeme")  # set in Render env
+ANTHROPIC_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")     # set in Render env
+
+def require_auth(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("authed"):
+            return jsonify({"error": {"message": "Not authenticated"}}), 401
+        return f(*args, **kwargs)
+    return wrapper
 
 # ─── PDF UTILITIES ────────────────────────────────────────────────────────────
 def filter_pdf_pages(pdf_bytes, page_range_str):
@@ -53,40 +67,38 @@ def filter_pdf_pages(pdf_bytes, page_range_str):
     writer.write(buf)
     return buf.getvalue()
 
-
-# ─── EXCEL TEMPLATE WRITER ────────────────────────────────────────────────────
+# ─── EXCEL TEMPLATE ───────────────────────────────────────────────────────────
 LABEL_MAP = {
     "Network Availability":                              "network",
-    "Deductible (Employee / Family)":                   "ded",
-    "Coinsurance (Member / Carrier)":                   "coinsurance",
-    "MOOP (Employee / Family)":                         "moop",
-    "PCP Copay":                                        "pcp",
-    "Telehealth":                                       "telehealth",
-    "Specialist Copay":                                 "specialist",
-    "Inpatient Hospitalization":                        "inpatient",
-    "Outpatient Facility":                              "op_facility",
-    "Emergency Room":                                   "er",
-    "Urgent Care":                                      "urgent_care",
-    "Laboratory":                                       "lab",
-    "X-ray":                                            "xray",
-    "Imaging (CT, MRI, PET)":                          "imaging",
-    "Deductible":                                       "rx_ded",
-    "Generic / Preferred / Non-preferred / Specialty":  "rx_tiers",
-    "Single":                                           "rate_ee",
-    "EE Only":                                          "rate_ee",
-    "Employee Only":                                    "rate_ee",
-    "Employee + Spouse":                                "rate_es",
-    "EE + Spouse":                                      "rate_es",
-    "Employee + Child(ren)":                            "rate_ec",
-    "Employee + Child":                                 "rate_ec",
-    "EE + Child(ren)":                                  "rate_ec",
-    "EE + Child":                                       "rate_ec",
-    "Family":                                           "rate_fam",
-    "Employee + Family":                                "rate_fam",
-    "EE + Family":                                      "rate_fam",
-    "Rate Guarantee":                                   "notes",
+    "Deductible (Employee / Family)":                    "ded",
+    "Coinsurance (Member / Carrier)":                    "coinsurance",
+    "MOOP (Employee / Family)":                          "moop",
+    "PCP Copay":                                         "pcp",
+    "Telehealth":                                        "telehealth",
+    "Specialist Copay":                                  "specialist",
+    "Inpatient Hospitalization":                         "inpatient",
+    "Outpatient Facility":                               "op_facility",
+    "Emergency Room":                                    "er",
+    "Urgent Care":                                       "urgent_care",
+    "Laboratory":                                        "lab",
+    "X-ray":                                             "xray",
+    "Imaging (CT, MRI, PET)":                            "imaging",
+    "Deductible":                                        "rx_ded",
+    "Generic / Preferred / Non-preferred / Specialty":   "rx_tiers",
+    "Single":                                            "rate_ee",
+    "EE Only":                                           "rate_ee",
+    "Employee Only":                                     "rate_ee",
+    "Employee + Spouse":                                 "rate_es",
+    "EE + Spouse":                                       "rate_es",
+    "Employee + Child(ren)":                             "rate_ec",
+    "Employee + Child":                                  "rate_ec",
+    "EE + Child(ren)":                                   "rate_ec",
+    "EE + Child":                                        "rate_ec",
+    "Family":                                            "rate_fam",
+    "Employee + Family":                                 "rate_fam",
+    "EE + Family":                                       "rate_fam",
+    "Rate Guarantee":                                    "notes",
 }
-
 
 def build_value(field_key, plan):
     if field_key == "ded":
@@ -106,15 +118,13 @@ def build_value(field_key, plan):
 
 
 def find_template_anchors(ws):
-    """Locate carrier_row, plan_row, and start_col by scanning for placeholders."""
     max_col = ws.max_column or 30
     start_col, carrier_row, plan_row = 8, -1, -1
 
     for r in range(10, 30):
         for c in range(6, min(max_col + 1, 35)):
             raw = ws.cell(r, c).value
-            if raw is None:
-                continue
+            if raw is None: continue
             v = str(raw).strip().lower()
             if v in ("plan 1", "plan #1", "plan#1"):
                 start_col, plan_row = c, r
@@ -126,8 +136,7 @@ def find_template_anchors(ws):
             if ("carrier 1" in v or v == "carrier1") and carrier_row < 0:
                 carrier_row = r
                 start_col = c
-        if plan_row > 0:
-            break
+        if plan_row > 0: break
 
     if carrier_row > 0 and plan_row < 0:
         plan_row = carrier_row + 1
@@ -141,9 +150,7 @@ def find_template_anchors(ws):
 
 
 def safe_set(ws, row, col, value):
-    """Write to a cell, unmerging slave cells first if needed."""
-    if row < 1 or col < 1:
-        return
+    if row < 1 or col < 1: return
     for merged in list(ws.merged_cells.ranges):
         if (merged.min_row <= row <= merged.max_row and
                 merged.min_col <= col <= merged.max_col and
@@ -163,27 +170,22 @@ def copy_cell_style(src, dst):
 
 
 def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
-    """
-    selected_plans: list of {carrier: str, plan: dict} — already filtered
-    renewal_data: optional dict with rate_ee/es/ec/fam
-    """
+    """selected_plans: list of {carrier, plan} (already filtered, in display order)."""
     wb = openpyxl.load_workbook(io.BytesIO(template_bytes))
     ws = next((wb[n] for n in wb.sheetnames if "medical" in n.lower()), wb.active)
     max_row = ws.max_row
 
-    # 1. Map row labels to row indices
     row_map = {}
     for r in range(1, max_row + 1):
         v = ws.cell(r, 3).value
         if v and str(v).strip() in LABEL_MAP:
             row_map[LABEL_MAP[str(v).strip()]] = r
 
-    # 2. Find template anchors
     start_col, carrier_row, plan_row = find_template_anchors(ws)
     if not selected_plans:
         raise ValueError("No plans selected for output.")
 
-    # Prepend renewal as leftmost column if provided
+    # Prepend renewal as leftmost column
     if renewal_data:
         renewal_plan_dict = {k: v for k, v in renewal_data.items() if k != "carrier"}
         if not renewal_plan_dict.get("plan_name"):
@@ -194,20 +196,17 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             "_is_renewal": True
         }] + list(selected_plans)
 
-    # 3. Write benefit data column-by-column
     tmpl_col = start_col
-    RENEWAL_FILL = PatternFill("solid", fgColor="FFF8E1")  # soft amber for renewal column
+    RENEWAL_FILL = PatternFill("solid", fgColor="FFF8E1")
     for idx, sp in enumerate(selected_plans):
         col = start_col + idx
         plan = sp["plan"]
         is_renewal = sp.get("_is_renewal", False)
 
-        # Copy column width
         if idx > 0:
             tmpl_dim = ws.column_dimensions[get_column_letter(tmpl_col)]
             ws.column_dimensions[get_column_letter(col)].width = tmpl_dim.width
 
-        # Plan name
         if plan_row > 0:
             if idx > 0:
                 copy_cell_style(ws.cell(plan_row, tmpl_col), ws.cell(plan_row, col))
@@ -215,7 +214,6 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if is_renewal:
                 ws.cell(plan_row, col).fill = RENEWAL_FILL
 
-        # Benefit rows
         for field_key, row in row_map.items():
             value = build_value(field_key, plan)
             if value == "" or value is None:
@@ -226,7 +224,7 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if is_renewal:
                 ws.cell(row, col).fill = RENEWAL_FILL
 
-    # 4. Write carrier names with proper merged cells per carrier group
+    # Carrier merging
     if carrier_row > 0:
         groups = []
         for idx, sp in enumerate(selected_plans):
@@ -238,13 +236,11 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
                 groups[-1][2] = col
 
         for name, first_col, last_col in groups:
-            # Unmerge any conflicting merges
             for merged in list(ws.merged_cells.ranges):
                 if (merged.min_row <= carrier_row <= merged.max_row and
                         merged.max_col >= first_col and merged.min_col <= last_col):
                     ws.unmerge_cells(str(merged))
 
-            # Copy template style to all cells in range
             tmpl_cell = ws.cell(carrier_row, tmpl_col)
             for c in range(first_col, last_col + 1):
                 copy_cell_style(tmpl_cell, ws.cell(carrier_row, c))
@@ -252,30 +248,45 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             ws.cell(carrier_row, first_col).value = name
             if last_col > first_col:
                 ws.merge_cells(start_row=carrier_row, start_column=first_col,
-                              end_row=carrier_row, end_column=last_col)
+                               end_row=carrier_row, end_column=last_col)
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf
 
-
 # ─── ROUTES ───────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
 
+@app.route("/api/auth/check")
+def auth_check():
+    return jsonify({"authed": bool(session.get("authed"))})
+
+@app.route("/api/auth/login", methods=["POST"])
+def login():
+    pw = (request.get_json() or {}).get("password", "")
+    if pw == APP_PASSWORD:
+        session["authed"] = True
+        session.permanent = True
+        return jsonify({"ok": True})
+    return jsonify({"error": {"message": "Incorrect password"}}), 401
+
+@app.route("/api/auth/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"ok": True})
 
 @app.route("/api/extract", methods=["POST"])
+@require_auth
 def extract():
+    if not ANTHROPIC_KEY:
+        return jsonify({"error": {"message": "ANTHROPIC_API_KEY not configured on server."}}), 500
+
     payload = request.get_json()
-    api_key = payload.pop("_apiKey", None)
     page_range = payload.pop("_pageRange", "all")
 
-    if not api_key:
-        return jsonify({"error": {"message": "No API key provided."}}), 400
-
-    # Apply page filter
     try:
         pdf_b64 = payload["messages"][0]["content"][0]["source"]["data"]
         if page_range and page_range.strip().lower() not in ("", "all"):
@@ -291,7 +302,7 @@ def extract():
             data=json.dumps(payload).encode(),
             headers={
                 "Content-Type": "application/json",
-                "x-api-key": api_key,
+                "x-api-key": ANTHROPIC_KEY,
                 "anthropic-version": "2023-06-01",
             },
             method="POST"
@@ -305,6 +316,7 @@ def extract():
 
 
 @app.route("/api/generate", methods=["POST"])
+@require_auth
 def generate():
     payload = request.get_json()
     template_b64 = payload.get("template")
