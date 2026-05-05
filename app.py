@@ -230,8 +230,17 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
                               end_row=carrier_row, end_column=last_col)
 
     # 5. Write renewal rows below rates
-    if renewal_data and row_map.get("rate_fam"):
-        last_rate_row = max(row_map.get(k, 0) for k in ("rate_ee", "rate_es", "rate_ec", "rate_fam"))
+    if renewal_data:
+        # Find a starting row for renewal section
+        rate_rows = [row_map.get(k) for k in ("rate_ee", "rate_es", "rate_ec", "rate_fam") if row_map.get(k)]
+        if rate_rows:
+            last_rate_row = max(rate_rows)
+        else:
+            # No rate rows found - put renewal at end of data
+            last_rate_row = max((r for r in row_map.values()), default=ws.max_row)
+            # If still nothing, just go to end of sheet
+            if not last_rate_row:
+                last_rate_row = ws.max_row or 50
         rr = last_rate_row + 2
 
         renewal_rows = [
@@ -248,6 +257,17 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
 
         label_font = Font(bold=True, size=10, color="666666")
         savings_font = Font(bold=True, size=10, color="166534")
+
+        # Write a section header
+        header_font = Font(bold=True, size=11, color="FFFFFF")
+        header_fill = PatternFill("solid", fgColor="1E4076")
+        safe_set(ws, rr - 1, 3, "CURRENT RENEWAL COMPARISON")
+        ws.cell(rr - 1, 3).font = header_font
+        ws.cell(rr - 1, 3).fill = header_fill
+        # Apply same styling across the data columns
+        for idx, sp in enumerate(selected_plans):
+            col = start_col + idx
+            ws.cell(rr - 1, col).fill = header_fill
 
         for ri, (label, val) in enumerate(renewal_rows):
             r = rr + ri
