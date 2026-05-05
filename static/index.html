@@ -1272,7 +1272,7 @@ function viewSelect() {
         <div class="hint" style="margin-top:2px">${plans.length} plan${plans.length !== 1 ? 's' : ''} extracted from ${S.carriers.length} carrier${S.carriers.length !== 1 ? 's' : ''}</div>
       </div>
       <div class="spacer"></div>
-      <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Start Over</button>
+      <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Go Back</button>
       <button class="btn btn-accent" onclick="set({step:4})" ${selectedCount === 0 ? 'disabled' : ''}>Preview & Verify →</button>
     </div>
   </div>
@@ -1340,7 +1340,7 @@ function viewSelect() {
   </div>
 
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
-    <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Start Over</button>
+    <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Go Back</button>
     <button class="btn btn-accent" onclick="set({step:4})" ${selectedCount === 0 ? 'disabled' : ''}>Preview & Verify → (${selectedCount} selected)</button>
   </div>`;
 }
