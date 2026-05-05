@@ -38,13 +38,13 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TEMPLATE_DIR = Path(os.environ.get("TEMPLATE_DIR", "/tmp/templates"))
 TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Mapping: plan count → filename
+# Mapping: quote type → filename
 TEMPLATE_FILES = {
-    1: TEMPLATE_DIR / "template_1plan.xlsx",
-    2: TEMPLATE_DIR / "template_2plan.xlsx",
-    3: TEMPLATE_DIR / "template_3plan.xlsx",
+    "single": TEMPLATE_DIR / "template_single.xlsx",
+    "double": TEMPLATE_DIR / "template_double.xlsx",
+    "triple": TEMPLATE_DIR / "template_triple.xlsx",
 }
-MAX_TEMPLATE_SIZE = 3   # use the 3-plan template for 4+ plans
+PLANS_PER_BUNDLE = {"single": 1, "double": 2, "triple": 3}
 
 def require_auth(f):
     @wraps(f)
@@ -54,10 +54,9 @@ def require_auth(f):
         return f(*args, **kwargs)
     return wrapper
 
-def pick_template_path(plan_count):
-    """Choose the right template based on plan count (excludes renewal)."""
-    size = min(max(plan_count, 1), MAX_TEMPLATE_SIZE)
-    return TEMPLATE_FILES.get(size)
+def pick_template_path(quote_type):
+    """Choose template by quote type: single / double / triple."""
+    return TEMPLATE_FILES.get((quote_type or "single").lower())
 
 # ─── PDF UTILITIES ────────────────────────────────────────────────────────────
 def filter_pdf_pages(pdf_bytes, page_range_str):
@@ -181,6 +180,139 @@ def copy_cell_style(src, dst):
         dst.border = src.border.copy()
         dst.alignment = src.alignment.copy()
         dst.number_format = src.number_format
+
+def write_excel_bundled(template_bytes, selected_bundles, client_name, renewal_bundle, quote_type, census=None):
+    """
+    selected_bundles: list of {carrier, plans: [plan_dict, plan_dict, ...]}
+        where len(plans) == bundle_size for the quote_type (1/2/3)
+    renewal_bundle: optional {carrier, plans: [...]} same structure
+    quote_type: "single" / "double" / "triple"
+    census: optional {ee, es, ec, fam} numbers for D34-D37
+    """
+    bundle_size = PLANS_PER_BUNDLE.get(quote_type, 1)
+
+    wb = openpyxl.load_workbook(io.BytesIO(template_bytes))
+    ws = next((wb[n] for n in wb.sheetnames if "medical" in n.lower()), wb.active)
+    max_row = ws.max_row
+
+    # Map row labels to row numbers
+    row_map = {}
+    for r in range(1, max_row + 1):
+        v = ws.cell(r, 3).value
+        if v and str(v).strip() in LABEL_MAP:
+            row_map[LABEL_MAP[str(v).strip()]] = r
+
+    start_col, carrier_row, plan_row = find_template_anchors(ws)
+    if not selected_bundles and not renewal_bundle:
+        raise ValueError("No plans selected for output.")
+
+    # Prepend renewal as the leftmost carrier-bundle
+    bundles = []
+    if renewal_bundle:
+        bundles.append({
+            "carrier": renewal_bundle.get("carrier") or "Current Renewal",
+            "plans": renewal_bundle.get("plans") or [],
+            "_is_renewal": True,
+        })
+    bundles.extend(selected_bundles)
+
+    # Write census (D34-D37) if provided
+    if census:
+        try:
+            if "ee"  in census and census["ee"]  is not None: ws.cell(34, 4).value = float(census["ee"])
+            if "es"  in census and census["es"]  is not None: ws.cell(35, 4).value = float(census["es"])
+            if "ec"  in census and census["ec"]  is not None: ws.cell(36, 4).value = float(census["ec"])
+            if "fam" in census and census["fam"] is not None: ws.cell(37, 4).value = float(census["fam"])
+        except (TypeError, ValueError):
+            pass
+
+    tmpl_col = start_col
+
+    # Each bundle takes `bundle_size` columns
+    for b_idx, bundle in enumerate(bundles):
+        bundle_first_col = start_col + b_idx * bundle_size
+        bundle_last_col  = bundle_first_col + bundle_size - 1
+        carrier_name = bundle.get("carrier") or "Unknown"
+        plans = bundle.get("plans") or []
+
+        # Pad plans list to bundle_size
+        while len(plans) < bundle_size:
+            plans.append({})
+
+        # Write each plan into its sub-column
+        for slot, plan in enumerate(plans[:bundle_size]):
+            col = bundle_first_col + slot
+
+            # Copy column width from template's first data column
+            if col != tmpl_col:
+                tmpl_dim = ws.column_dimensions[get_column_letter(tmpl_col)]
+                ws.column_dimensions[get_column_letter(col)].width = tmpl_dim.width
+
+            # Plan name row
+            if plan_row > 0:
+                if col != tmpl_col:
+                    copy_cell_style(ws.cell(plan_row, tmpl_col), ws.cell(plan_row, col))
+                safe_set(ws, plan_row, col, plan.get("plan_name") or "")
+
+            # Benefit rows
+            for field_key, row in row_map.items():
+                value = build_value(field_key, plan)
+                if value == "" or value is None:
+                    continue
+                if col != tmpl_col:
+                    copy_cell_style(ws.cell(row, tmpl_col), ws.cell(row, col))
+                safe_set(ws, row, col, value)
+
+        # Carrier row: write name once, merge across bundle's columns
+        if carrier_row > 0:
+            # Unmerge any existing merges in this range
+            for merged in list(ws.merged_cells.ranges):
+                if (merged.min_row <= carrier_row <= merged.max_row and
+                        merged.max_col >= bundle_first_col and merged.min_col <= bundle_last_col):
+                    ws.unmerge_cells(str(merged))
+
+            tmpl_cell = ws.cell(carrier_row, tmpl_col)
+            for c in range(bundle_first_col, bundle_last_col + 1):
+                copy_cell_style(tmpl_cell, ws.cell(carrier_row, c))
+
+            ws.cell(carrier_row, bundle_first_col).value = carrier_name
+            if bundle_last_col > bundle_first_col:
+                ws.merge_cells(start_row=carrier_row, start_column=bundle_first_col,
+                               end_row=carrier_row, end_column=bundle_last_col)
+
+    # Clear leftover placeholder text in unused bundle slots beyond what we wrote
+    last_used_col = start_col + len(bundles) * bundle_size - 1
+    for c in range(last_used_col + 1, ws.max_column + 1):
+        # Carrier row, plan row: clear placeholder text and any merge that starts here
+        for r in [carrier_row, plan_row]:
+            if r > 0:
+                for merged in list(ws.merged_cells.ranges):
+                    if (merged.min_row <= r <= merged.max_row and
+                            merged.min_col <= c <= merged.max_col):
+                        ws.unmerge_cells(str(merged))
+                        break
+                cell_val = ws.cell(r, c).value
+                if cell_val:
+                    s = str(cell_val).lower().strip()
+                    if any(k in s for k in ("carrier ", "plan ", "carrier#", "plan#")):
+                        ws.cell(r, c).value = None
+
+        # Clear demo data in benefit rows
+        for field_key, row in row_map.items():
+            cell_val = ws.cell(row, c).value
+            if cell_val is not None:
+                for merged in list(ws.merged_cells.ranges):
+                    if (merged.min_row <= row <= merged.max_row and
+                            merged.min_col <= c <= merged.max_col):
+                        ws.unmerge_cells(str(merged))
+                        break
+                ws.cell(row, c).value = None
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
 
 def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
     wb = openpyxl.load_workbook(io.BytesIO(template_bytes))
@@ -317,10 +449,10 @@ def logout():
 @app.route("/api/templates", methods=["GET"])
 @require_auth
 def list_templates():
-    """Return which template sizes are available."""
+    """Return which template types are available."""
     out = []
-    for size, path in TEMPLATE_FILES.items():
-        info = {"size": size, "available": path.exists()}
+    for qt, path in TEMPLATE_FILES.items():
+        info = {"type": qt, "available": path.exists()}
         if path.exists():
             stat = path.stat()
             info["sizeBytes"] = stat.st_size
@@ -328,12 +460,12 @@ def list_templates():
         out.append(info)
     return jsonify({"templates": out})
 
-@app.route("/api/templates/<int:size>", methods=["POST"])
+@app.route("/api/templates/<quote_type>", methods=["POST"])
 @require_auth
-def upload_template(size):
-    """Upload or replace the template for the given plan count."""
-    if size not in TEMPLATE_FILES:
-        return jsonify({"error": {"message": f"Invalid template size: {size}"}}), 400
+def upload_template(quote_type):
+    qt = quote_type.lower()
+    if qt not in TEMPLATE_FILES:
+        return jsonify({"error": {"message": f"Invalid quote type: {quote_type}"}}), 400
 
     if "file" not in request.files:
         return jsonify({"error": {"message": "No file provided"}}), 400
@@ -342,30 +474,32 @@ def upload_template(size):
     if not f.filename.lower().endswith((".xlsx", ".xls")):
         return jsonify({"error": {"message": "Must be an .xlsx file"}}), 400
 
-    target = TEMPLATE_FILES[size]
+    target = TEMPLATE_FILES[qt]
     target.parent.mkdir(parents=True, exist_ok=True)
     f.save(str(target))
-    return jsonify({"ok": True, "size": size})
+    return jsonify({"ok": True, "type": qt})
 
-@app.route("/api/templates/<int:size>", methods=["DELETE"])
+@app.route("/api/templates/<quote_type>", methods=["DELETE"])
 @require_auth
-def delete_template(size):
-    if size not in TEMPLATE_FILES:
-        return jsonify({"error": {"message": f"Invalid template size: {size}"}}), 400
-    if TEMPLATE_FILES[size].exists():
-        TEMPLATE_FILES[size].unlink()
+def delete_template(quote_type):
+    qt = quote_type.lower()
+    if qt not in TEMPLATE_FILES:
+        return jsonify({"error": {"message": f"Invalid quote type: {quote_type}"}}), 400
+    if TEMPLATE_FILES[qt].exists():
+        TEMPLATE_FILES[qt].unlink()
     return jsonify({"ok": True})
 
-@app.route("/api/templates/<int:size>/download", methods=["GET"])
+@app.route("/api/templates/<quote_type>/download", methods=["GET"])
 @require_auth
-def download_template(size):
-    if size not in TEMPLATE_FILES or not TEMPLATE_FILES[size].exists():
+def download_template(quote_type):
+    qt = quote_type.lower()
+    if qt not in TEMPLATE_FILES or not TEMPLATE_FILES[qt].exists():
         return jsonify({"error": {"message": "Template not found"}}), 404
     return send_file(
-        str(TEMPLATE_FILES[size]),
+        str(TEMPLATE_FILES[qt]),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name=f"template_{size}plan.xlsx"
+        download_name=f"template_{qt}.xlsx"
     )
 
 @app.route("/api/extract", methods=["POST"])
@@ -409,26 +543,23 @@ def extract():
 @require_auth
 def generate():
     payload = request.get_json()
-    selected_plans = payload.get("selectedPlans", [])
+    # selected_bundles: list of {carrier, plans: [plan_dict, ...]} where plans length == bundle_size
+    selected_bundles = payload.get("selectedBundles", [])
     client_name = payload.get("clientName", "Group")
-    renewal_data = payload.get("renewalData")
+    renewal_bundle = payload.get("renewalBundle")  # {carrier, plans: [...]}
+    quote_type = (payload.get("quoteType") or "single").lower()
+    census = payload.get("census")  # {ee, es, ec, fam} optional
 
-    # Total columns = carrier plans + renewal (if present)
-    total_cols = len(selected_plans) + (1 if renewal_data else 0)
-    template_path = pick_template_path(total_cols)
-
-    # Diagnostics
-    available = [s for s, p in TEMPLATE_FILES.items() if p.exists()]
-    chosen_size = min(max(total_cols, 1), MAX_TEMPLATE_SIZE)
-    print(f"[generate] carrier_plans={len(selected_plans)}, renewal={bool(renewal_data)}, total_cols={total_cols}, chosen_size={chosen_size}, available_templates={available}, path_exists={template_path.exists() if template_path else False}")
+    template_path = pick_template_path(quote_type)
+    available = [qt for qt, p in TEMPLATE_FILES.items() if p.exists()]
+    print(f"[generate] quote_type={quote_type}, bundles={len(selected_bundles)}, renewal={bool(renewal_bundle)}, available_templates={available}")
 
     if not template_path or not template_path.exists():
-        msg = f"No {chosen_size}-plan template uploaded. Available templates: {available or 'none'}. Upload via Manage Templates."
-        return jsonify({"error": {"message": msg}}), 400
+        return jsonify({"error": {"message": f"No '{quote_type}' template uploaded. Upload one via Manage Templates."}}), 400
 
     try:
         template_bytes = template_path.read_bytes()
-        buf = write_excel(template_bytes, selected_plans, client_name, renewal_data)
+        buf = write_excel_bundled(template_bytes, selected_bundles, client_name, renewal_bundle, quote_type, census)
         safe_name = client_name.replace(" ", "_") or "Group"
         return send_file(
             buf,
@@ -437,6 +568,8 @@ def generate():
             download_name=f"{safe_name}_Medical_Comparison.xlsx"
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": {"message": str(e)}}), 500
 
 
