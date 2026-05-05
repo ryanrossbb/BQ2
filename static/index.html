@@ -175,7 +175,8 @@
   .complete-sub{font-size:14px;color:var(--gray-600);margin-bottom:1.75rem;line-height:1.6}
 
   /* PAGE SELECT */
-  .page-card{display:flex;align-items:center;gap:14px;padding:14px 18px;background:white;border-radius:var(--radius-sm);border:1px solid var(--gray-200);margin-bottom:8px}
+  .page-card{padding:14px 18px;background:white;border-radius:var(--radius-sm);border:1px solid var(--gray-200);margin-bottom:10px}
+  .page-card-header{display:flex;align-items:center;gap:14px;margin-bottom:10px}
   .page-card-icon{font-size:22px;flex-shrink:0;width:36px;height:36px;background:var(--gray-100);border-radius:8px;display:flex;align-items:center;justify-content:center}
   .page-card-icon.renewal{background:#fef3c7}
   .page-card-info{flex:1;min-width:0}
@@ -185,6 +186,20 @@
   .page-card-tag.carrier{background:var(--primary-pale);color:var(--primary)}
   .page-card-tag.renewal{background:#fef3c7;color:#854d0e}
   .page-card input[type=text]{height:32px;font-size:12px;width:200px}
+  .page-card-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .page-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .page-action-btn{font-size:10px;padding:3px 8px;border:1px solid var(--gray-300);border-radius:12px;background:white;cursor:pointer;color:var(--gray-600);transition:all 0.1s;font-family:inherit}
+  .page-action-btn:hover{border-color:var(--primary-light);color:var(--primary)}
+  .page-action-divider{width:1px;height:14px;background:var(--gray-300);margin:0 3px}
+  .thumbs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:14px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius-sm);margin-top:10px}
+  .thumb{position:relative;cursor:pointer;background:white;border:2px solid var(--gray-200);border-radius:var(--radius-sm);overflow:hidden;transition:all 0.12s}
+  .thumb:hover{border-color:var(--primary-light);transform:translateY(-1px)}
+  .thumb.selected{border-color:var(--primary);box-shadow:0 0 0 2px rgba(13,42,79,0.12)}
+  .thumb.selected::after{content:"✓";position:absolute;top:6px;right:6px;width:22px;height:22px;background:var(--primary);color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;z-index:2}
+  .thumb canvas{width:100%;display:block;background:#fff}
+  .thumb-loading{display:flex;align-items:center;justify-content:center;height:170px;color:var(--gray-300);font-size:11px;background:var(--gray-50)}
+  .thumb-label{padding:6px 8px;font-size:11px;font-weight:500;color:var(--gray-700);text-align:center;border-top:1px solid var(--gray-100);background:var(--gray-50)}
+  .thumb.selected .thumb-label{background:var(--primary-pale);color:var(--primary);font-weight:600}
 
   /* RATE COMPARISON CARD */
   .rate-comp{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1rem}
@@ -479,29 +494,61 @@ function goToPages() {
 
 // ─── STEP 1: PAGE SELECTION ──────────────────────────────────────────────────
 function viewPages() {
-  const rows = S.files.map((f, i) => `
+  const rows = S.files.map((f, i) => {
+    const totalPages = f.pageCount || 0;
+    const selectedPages = parsePageRange(f.pageRange, totalPages);
+    const summaryText = selectedPages.size === 0 ? 'All pages will be sent' :
+                        selectedPages.size === totalPages ? 'All pages will be sent' :
+                        `${selectedPages.size} of ${totalPages} page${totalPages !== 1 ? 's' : ''} selected`;
+    return `
     <div class="page-card">
-      <div class="page-card-icon ${f.role === 'renewal' ? 'renewal' : ''}">${f.role === 'renewal' ? '🔄' : '📄'}</div>
-      <div class="page-card-info">
-        <div class="page-card-name">${escHtml(f.file.name)}</div>
-        <div class="page-card-meta">
-          <span class="page-card-tag ${f.role === 'renewal' ? 'renewal' : 'carrier'}">${f.role === 'renewal' ? 'Renewal' : 'Carrier'}</span>
-          <span>${f.pageCount ? f.pageCount + ' pages' : 'reading...'}</span>
+      <div class="page-card-header">
+        <div class="page-card-icon ${f.role === 'renewal' ? 'renewal' : ''}">${f.role === 'renewal' ? '🔄' : '📄'}</div>
+        <div class="page-card-info">
+          <div class="page-card-name">${escHtml(f.file.name)}</div>
+          <div class="page-card-meta">
+            <span class="page-card-tag ${f.role === 'renewal' ? 'renewal' : 'carrier'}">${f.role === 'renewal' ? 'Renewal' : 'Carrier'}</span>
+            <span>${f.pageCount ? f.pageCount + ' pages total' : 'reading...'}</span>
+            <span style="color:var(--primary);font-weight:500">· ${summaryText}</span>
+          </div>
         </div>
       </div>
-      <div>
-        <input type="text" placeholder="All pages" value="${escHtml(f.pageRange || '')}" oninput="S.files[${i}].pageRange=this.value">
-        <div style="font-size:10px;color:var(--gray-400);margin-top:3px">e.g. "1-5, 8" or blank for all</div>
+      <div class="page-card-controls">
+        <div class="page-actions">
+          <button class="page-action-btn" onclick="selectAllPages(${i})">Select All</button>
+          <button class="page-action-btn" onclick="clearPages(${i})">Clear</button>
+          <button class="page-action-btn" onclick="selectFirstPages(${i}, 2)">First 2</button>
+          <button class="page-action-btn" onclick="selectFirstPages(${i}, 5)">First 5</button>
+          <div class="page-action-divider"></div>
+          <span style="font-size:11px;color:var(--gray-500)">or type:</span>
+          <input type="text" placeholder="e.g. 1-5, 8" value="${escHtml(f.pageRange || '')}" 
+            oninput="S.files[${i}].pageRange=this.value;updatePageSummary(${i})"
+            onblur="render()" style="height:28px;font-size:12px;width:140px">
+        </div>
       </div>
-    </div>
-  `).join('');
+      ${totalPages > 0 ? `<div class="thumbs-grid" id="thumbs-${i}">${
+        Array.from({length: totalPages}, (_, p) => {
+          const pageNum = p + 1;
+          const isSelected = selectedPages.size === 0 || selectedPages.has(pageNum);
+          return `<div class="thumb ${isSelected ? 'selected' : ''}" onclick="togglePage(${i}, ${pageNum})">
+            <canvas id="thumb-${i}-${pageNum}"></canvas>
+            <div class="thumb-loading" id="thumbloading-${i}-${pageNum}">Loading...</div>
+            <div class="thumb-label">Page ${pageNum}</div>
+          </div>`;
+        }).join('')
+      }</div>` : '<div class="hint" style="margin-top:6px">Reading PDF page count...</div>'}
+    </div>`;
+  }).join('');
+
+  // After render, render the thumbnails
+  setTimeout(renderAllThumbnails, 50);
 
   return `
   <div class="card" style="margin-bottom:1rem">
     <div class="row">
       <div>
         <div style="font-weight:600;font-size:16px;color:var(--gray-900)">Select Pages to Extract</div>
-        <div class="hint" style="margin-top:4px">Limit each PDF to plan-relevant pages to reduce errors and processing time. Leave blank to use all pages.</div>
+        <div class="hint" style="margin-top:4px">Click thumbnails to choose which pages get sent to Claude. Use Select All if unsure.</div>
       </div>
       <div class="spacer"></div>
       <button class="btn btn-ghost" onclick="set({step:0})">← Back</button>
@@ -513,6 +560,133 @@ function viewPages() {
     <button class="btn btn-ghost" onclick="set({step:0})">← Back</button>
     <button class="btn btn-primary" onclick="startExtraction()">Extract Plan Data →</button>
   </div>`;
+}
+
+// Convert text page range to set of page numbers
+function parsePageRange(rangeStr, total) {
+  const result = new Set();
+  if (!rangeStr || !rangeStr.trim() || rangeStr.trim().toLowerCase() === 'all') return result;
+  rangeStr.split(',').forEach(part => {
+    part = part.trim();
+    if (part.includes('-')) {
+      const [s, e] = part.split('-').map(x => parseInt(x.trim(), 10));
+      if (!isNaN(s) && !isNaN(e)) {
+        for (let p = Math.max(1, s); p <= Math.min(total, e); p++) result.add(p);
+      }
+    } else {
+      const n = parseInt(part, 10);
+      if (!isNaN(n) && n >= 1 && n <= total) result.add(n);
+    }
+  });
+  return result;
+}
+
+// Convert set back to compact range string (e.g. "1-3, 5, 7-9")
+function pagesToRange(pages, total) {
+  if (pages.size === 0 || pages.size === total) return '';
+  const sorted = [...pages].sort((a, b) => a - b);
+  const ranges = [];
+  let start = sorted[0], prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    if (i === sorted.length || sorted[i] !== prev + 1) {
+      ranges.push(start === prev ? String(start) : `${start}-${prev}`);
+      if (i < sorted.length) start = sorted[i];
+    }
+    prev = sorted[i];
+  }
+  return ranges.join(', ');
+}
+
+function togglePage(fileIdx, pageNum) {
+  const f = S.files[fileIdx];
+  const total = f.pageCount || 0;
+  let pages = parsePageRange(f.pageRange, total);
+  // Treat empty as "all pages selected"
+  if (pages.size === 0) {
+    pages = new Set(Array.from({length: total}, (_, i) => i + 1));
+  }
+  if (pages.has(pageNum)) pages.delete(pageNum);
+  else pages.add(pageNum);
+  S.files[fileIdx].pageRange = pagesToRange(pages, total);
+  // Update just the thumb visual + summary, not full re-render
+  const thumb = document.querySelector(`#thumbs-${fileIdx} .thumb:nth-child(${pageNum})`);
+  if (thumb) thumb.classList.toggle('selected', pages.has(pageNum));
+  updatePageSummary(fileIdx);
+  // Update the text input
+  const inputs = document.querySelectorAll(`.page-card input[type=text]`);
+  if (inputs[fileIdx]) inputs[fileIdx].value = S.files[fileIdx].pageRange;
+}
+
+function updatePageSummary(fileIdx) {
+  const f = S.files[fileIdx];
+  const total = f.pageCount || 0;
+  const selected = parsePageRange(f.pageRange, total);
+  const cards = document.querySelectorAll('.page-card');
+  if (!cards[fileIdx]) return;
+  const meta = cards[fileIdx].querySelector('.page-card-meta');
+  if (!meta) return;
+  const summarySpan = meta.querySelector('span:last-child');
+  if (!summarySpan || !summarySpan.style.color) return;
+  const summaryText = selected.size === 0 ? 'All pages will be sent' :
+                      selected.size === total ? 'All pages will be sent' :
+                      `${selected.size} of ${total} page${total !== 1 ? 's' : ''} selected`;
+  summarySpan.textContent = `· ${summaryText}`;
+}
+
+function selectAllPages(fileIdx) {
+  S.files[fileIdx].pageRange = '';
+  render();
+}
+
+function clearPages(fileIdx) {
+  // Selecting "no pages" means we set range to one impossible page so nothing's selected visually
+  // but keep at least page 1 to avoid sending nothing
+  S.files[fileIdx].pageRange = '1';
+  render();
+}
+
+function selectFirstPages(fileIdx, count) {
+  const total = S.files[fileIdx].pageCount || 0;
+  if (!total) return;
+  S.files[fileIdx].pageRange = `1-${Math.min(count, total)}`;
+  render();
+}
+
+async function renderAllThumbnails() {
+  await loadPdfJs();
+  for (let i = 0; i < S.files.length; i++) {
+    const f = S.files[i];
+    if (!f.pageCount) continue;
+    if (!f._pdfDoc) {
+      try {
+        const ab = await fileToArrayBuffer(f.file);
+        f._pdfDoc = await window.pdfjsLib.getDocument({ data: ab }).promise;
+      } catch (e) {
+        console.warn('PDF load failed', e);
+        continue;
+      }
+    }
+    for (let p = 1; p <= f.pageCount; p++) {
+      const canvas = document.getElementById(`thumb-${i}-${p}`);
+      const loadingEl = document.getElementById(`thumbloading-${i}-${p}`);
+      if (!canvas || canvas.dataset.rendered) continue;
+      try {
+        const page = await f._pdfDoc.getPage(p);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const targetWidth = 180;  // medium thumbnail width
+        const scale = targetWidth / baseViewport.width;
+        const viewport = page.getViewport({ scale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        canvas.dataset.rendered = 'true';
+        if (loadingEl) loadingEl.style.display = 'none';
+      } catch (e) {
+        console.warn(`Page ${p} render failed`, e);
+      }
+    }
+  }
 }
 
 // ─── STEP 2: EXTRACTION ──────────────────────────────────────────────────────
