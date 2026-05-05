@@ -1,7 +1,7 @@
 """
-Medical Benefits Comparison — v4
-Phase 1: password auth, server-stored API key, multi-group sessions,
-spreadsheet preview, single-sheet output.
+Medical Benefits Comparison — v4 Phase 2
+Adds: server-side template library with auto-selection by plan count,
+admin upload/swap UI, removed per-session template upload.
 """
 
 import os
@@ -12,8 +12,9 @@ import secrets
 import urllib.request
 import urllib.error
 from functools import wraps
+from pathlib import Path
 
-from flask import Flask, request, jsonify, send_file, send_from_directory, session, redirect
+from flask import Flask, request, jsonify, send_file, send_from_directory, session
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
@@ -28,8 +29,22 @@ app = Flask(__name__, static_folder="static")
 app.secret_key = os.environ.get("FLASK_SECRET", secrets.token_hex(32))
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
-APP_PASSWORD   = os.environ.get("APP_PASSWORD", "changeme")  # set in Render env
-ANTHROPIC_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")     # set in Render env
+APP_PASSWORD  = os.environ.get("APP_PASSWORD", "changeme")
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+# Persistent template directory. On Render free tier this resets on redeploys,
+# but uploaded templates persist across the running process.
+# For permanent storage, mount a Render Disk to this path.
+TEMPLATE_DIR = Path(os.environ.get("TEMPLATE_DIR", "/tmp/templates"))
+TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Mapping: plan count → filename
+TEMPLATE_FILES = {
+    1: TEMPLATE_DIR / "template_1plan.xlsx",
+    2: TEMPLATE_DIR / "template_2plan.xlsx",
+    3: TEMPLATE_DIR / "template_3plan.xlsx",
+}
+MAX_TEMPLATE_SIZE = 3   # use the 3-plan template for 4+ plans
 
 def require_auth(f):
     @wraps(f)
@@ -38,6 +53,11 @@ def require_auth(f):
             return jsonify({"error": {"message": "Not authenticated"}}), 401
         return f(*args, **kwargs)
     return wrapper
+
+def pick_template_path(plan_count):
+    """Choose the right template based on plan count (excludes renewal)."""
+    size = min(max(plan_count, 1), MAX_TEMPLATE_SIZE)
+    return TEMPLATE_FILES.get(size)
 
 # ─── PDF UTILITIES ────────────────────────────────────────────────────────────
 def filter_pdf_pages(pdf_bytes, page_range_str):
@@ -67,7 +87,7 @@ def filter_pdf_pages(pdf_bytes, page_range_str):
     writer.write(buf)
     return buf.getvalue()
 
-# ─── EXCEL TEMPLATE ───────────────────────────────────────────────────────────
+# ─── EXCEL TEMPLATE WRITER ────────────────────────────────────────────────────
 LABEL_MAP = {
     "Network Availability":                              "network",
     "Deductible (Employee / Family)":                    "ded",
@@ -116,11 +136,9 @@ def build_value(field_key, plan):
             return v or ""
     return plan.get(field_key, "") or ""
 
-
 def find_template_anchors(ws):
     max_col = ws.max_column or 30
     start_col, carrier_row, plan_row = 8, -1, -1
-
     for r in range(10, 30):
         for c in range(6, min(max_col + 1, 35)):
             raw = ws.cell(r, c).value
@@ -137,7 +155,6 @@ def find_template_anchors(ws):
                 carrier_row = r
                 start_col = c
         if plan_row > 0: break
-
     if carrier_row > 0 and plan_row < 0:
         plan_row = carrier_row + 1
     if plan_row < 0:
@@ -145,9 +162,7 @@ def find_template_anchors(ws):
             if ws.cell(r, 2).value == "h":
                 plan_row, carrier_row = r, r - 1
                 break
-
     return start_col, carrier_row, plan_row
-
 
 def safe_set(ws, row, col, value):
     if row < 1 or col < 1: return
@@ -159,7 +174,6 @@ def safe_set(ws, row, col, value):
             break
     ws.cell(row, col).value = value
 
-
 def copy_cell_style(src, dst):
     if src.has_style:
         dst.font = src.font.copy()
@@ -168,9 +182,7 @@ def copy_cell_style(src, dst):
         dst.alignment = src.alignment.copy()
         dst.number_format = src.number_format
 
-
 def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
-    """selected_plans: list of {carrier, plan} (already filtered, in display order)."""
     wb = openpyxl.load_workbook(io.BytesIO(template_bytes))
     ws = next((wb[n] for n in wb.sheetnames if "medical" in n.lower()), wb.active)
     max_row = ws.max_row
@@ -185,7 +197,6 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
     if not selected_plans:
         raise ValueError("No plans selected for output.")
 
-    # Prepend renewal as leftmost column
     if renewal_data:
         renewal_plan_dict = {k: v for k, v in renewal_data.items() if k != "carrier"}
         if not renewal_plan_dict.get("plan_name"):
@@ -224,7 +235,6 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
             if is_renewal:
                 ws.cell(row, col).fill = RENEWAL_FILL
 
-    # Carrier merging
     if carrier_row > 0:
         groups = []
         for idx, sp in enumerate(selected_plans):
@@ -240,11 +250,9 @@ def write_excel(template_bytes, selected_plans, client_name, renewal_data=None):
                 if (merged.min_row <= carrier_row <= merged.max_row and
                         merged.max_col >= first_col and merged.min_col <= last_col):
                     ws.unmerge_cells(str(merged))
-
             tmpl_cell = ws.cell(carrier_row, tmpl_col)
             for c in range(first_col, last_col + 1):
                 copy_cell_style(tmpl_cell, ws.cell(carrier_row, c))
-
             ws.cell(carrier_row, first_col).value = name
             if last_col > first_col:
                 ws.merge_cells(start_row=carrier_row, start_column=first_col,
@@ -277,6 +285,60 @@ def login():
 def logout():
     session.clear()
     return jsonify({"ok": True})
+
+@app.route("/api/templates", methods=["GET"])
+@require_auth
+def list_templates():
+    """Return which template sizes are available."""
+    out = []
+    for size, path in TEMPLATE_FILES.items():
+        info = {"size": size, "available": path.exists()}
+        if path.exists():
+            stat = path.stat()
+            info["sizeBytes"] = stat.st_size
+            info["modifiedAt"] = int(stat.st_mtime)
+        out.append(info)
+    return jsonify({"templates": out})
+
+@app.route("/api/templates/<int:size>", methods=["POST"])
+@require_auth
+def upload_template(size):
+    """Upload or replace the template for the given plan count."""
+    if size not in TEMPLATE_FILES:
+        return jsonify({"error": {"message": f"Invalid template size: {size}"}}), 400
+
+    if "file" not in request.files:
+        return jsonify({"error": {"message": "No file provided"}}), 400
+
+    f = request.files["file"]
+    if not f.filename.lower().endswith((".xlsx", ".xls")):
+        return jsonify({"error": {"message": "Must be an .xlsx file"}}), 400
+
+    target = TEMPLATE_FILES[size]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    f.save(str(target))
+    return jsonify({"ok": True, "size": size})
+
+@app.route("/api/templates/<int:size>", methods=["DELETE"])
+@require_auth
+def delete_template(size):
+    if size not in TEMPLATE_FILES:
+        return jsonify({"error": {"message": f"Invalid template size: {size}"}}), 400
+    if TEMPLATE_FILES[size].exists():
+        TEMPLATE_FILES[size].unlink()
+    return jsonify({"ok": True})
+
+@app.route("/api/templates/<int:size>/download", methods=["GET"])
+@require_auth
+def download_template(size):
+    if size not in TEMPLATE_FILES or not TEMPLATE_FILES[size].exists():
+        return jsonify({"error": {"message": "Template not found"}}), 404
+    return send_file(
+        str(TEMPLATE_FILES[size]),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"template_{size}plan.xlsx"
+    )
 
 @app.route("/api/extract", methods=["POST"])
 @require_auth
@@ -319,16 +381,18 @@ def extract():
 @require_auth
 def generate():
     payload = request.get_json()
-    template_b64 = payload.get("template")
     selected_plans = payload.get("selectedPlans", [])
     client_name = payload.get("clientName", "Group")
     renewal_data = payload.get("renewalData")
 
-    if not template_b64:
-        return jsonify({"error": {"message": "No template file provided."}}), 400
+    plan_count = len(selected_plans)
+    template_path = pick_template_path(plan_count)
+
+    if not template_path or not template_path.exists():
+        return jsonify({"error": {"message": f"Template for {plan_count} plans is not configured. Upload one in Manage Templates."}}), 400
 
     try:
-        template_bytes = base64.b64decode(template_b64)
+        template_bytes = template_path.read_bytes()
         buf = write_excel(template_bytes, selected_plans, client_name, renewal_data)
         safe_name = client_name.replace(" ", "_") or "Group"
         return send_file(
