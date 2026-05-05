@@ -218,6 +218,49 @@
     .step-text{display:none}
     .rate-comp{grid-template-columns:repeat(2,1fr)}
   }
+
+  /* Dashboard */
+  .dash-header{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem}
+  .dash-title{font-size:22px;font-weight:600;color:var(--gray-900)}
+  .dash-sub{font-size:13px;color:var(--gray-500)}
+  .group-card{background:white;border-radius:var(--radius);box-shadow:var(--shadow);padding:1.25rem 1.5rem;border:1px solid var(--gray-200);margin-bottom:0.75rem;display:flex;align-items:center;gap:14px}
+  .group-card-info{flex:1;min-width:0}
+  .group-card-name{font-size:15px;font-weight:600;color:var(--gray-900);margin-bottom:4px}
+  .group-card-meta{font-size:12px;color:var(--gray-500)}
+  .group-card-actions{display:flex;gap:6px}
+  .group-card-status{display:inline-flex;align-items:center;padding:3px 9px;font-size:10px;font-weight:600;border-radius:11px;text-transform:uppercase;letter-spacing:.05em;margin-left:8px}
+  .group-card-status.draft{background:var(--amber-bg);color:var(--amber)}
+  .group-card-status.ready{background:var(--green-bg);color:var(--green)}
+  .empty-state{background:white;border-radius:var(--radius);padding:3rem;text-align:center;border:2px dashed var(--gray-300)}
+  .empty-icon{font-size:42px;margin-bottom:1rem}
+  .empty-title{font-size:16px;font-weight:500;margin-bottom:6px;color:var(--gray-700)}
+  .empty-sub{font-size:13px;color:var(--gray-500);margin-bottom:1.25rem;line-height:1.5}
+
+  /* Preview spreadsheet */
+  .preview-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:1rem;padding:10px 14px;background:var(--primary-pale);border-radius:var(--radius-sm);border:1px solid #bfdbfe}
+  .preview-info{font-size:12px;color:var(--primary)}
+  .preview-table-wrap{overflow-x:auto;border:1px solid var(--gray-200);border-radius:var(--radius-sm);background:white;max-height:75vh}
+  .ptbl{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}
+  .ptbl th,.ptbl td{border-right:1px solid var(--gray-200);border-bottom:1px solid var(--gray-200);padding:0;vertical-align:middle}
+  .ptbl th:last-child,.ptbl td:last-child{border-right:none}
+  .ptbl thead th{background:var(--gray-50);font-weight:600;color:var(--gray-700);position:sticky;top:0;z-index:2;border-bottom:2px solid var(--gray-300)}
+  .ptbl thead .carrier-row th{background:var(--primary);color:white;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:8px 12px}
+  .ptbl thead .plan-row th{background:var(--primary-light);color:white;font-size:12px;padding:7px 12px}
+  .ptbl thead .renewal-header{background:var(--accent)!important;color:var(--primary)!important}
+  .ptbl tbody td{padding:6px 10px;color:var(--gray-700)}
+  .ptbl tbody td.label-cell{position:sticky;left:0;background:var(--gray-50);font-weight:500;color:var(--gray-600);min-width:170px;max-width:220px;border-right:2px solid var(--gray-300);z-index:1}
+  .ptbl tbody tr:hover td.label-cell{background:#eef3fa}
+  .ptbl .section-header td{background:var(--primary-pale);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--primary);padding:6px 12px}
+  .ptbl .section-header td.label-cell{background:var(--primary-pale)}
+  .ptbl .renewal-col{background:#fffbeb}
+  .ptbl tbody tr:hover .renewal-col{background:#fef3c7}
+  .editable-cell{cursor:text;outline:none;min-width:100px;display:block;padding:6px 10px;margin:-6px -10px;border-radius:0}
+  .editable-cell:hover{background:rgba(13,42,79,0.04)}
+  .editable-cell:focus{background:#fff;box-shadow:inset 0 0 0 2px var(--primary-light);position:relative;z-index:3}
+  .savings-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:1rem}
+  .savings-stat{background:white;border:1px solid var(--gray-200);border-radius:var(--radius-sm);padding:12px;text-align:center}
+  .savings-stat-label{font-size:10px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:4px}
+  .savings-stat-value{font-size:16px;font-weight:600;font-family:"SF Mono",Menlo,monospace}
 </style>
 </head>
 <body>
@@ -229,26 +272,19 @@
     <span class="brand-title">Medical Benefits Comparison</span>
     <span class="brand-sub">Carrier Quote Toolkit</span>
   </div>
-  <button class="key-btn" onclick="openKeyModal()">
-    <div class="key-dot" id="key-dot"></div>
-    <span id="key-label">Set API Key</span>
-  </button>
+  <div style="display:flex;gap:8px;align-items:center" id="topbar-actions"></div>
 </div>
 
-<!-- API KEY MODAL -->
-<div class="modal-bg" id="key-modal">
+<!-- LOGIN MODAL -->
+<div class="modal-bg" id="login-modal">
   <div class="modal">
-    <div class="modal-title">🔑 Anthropic API Key</div>
-    <div class="modal-sub">
-      Your key is forwarded directly to Anthropic and never stored on the server.<br><br>
-      Get your key at <a href="https://console.anthropic.com" target="_blank" style="color:var(--primary-light)">console.anthropic.com</a> → API Keys.
-    </div>
-    <label class="field-label">API Key</label>
-    <input type="password" id="key-input" placeholder="sk-ant-api03-..." autocomplete="off">
-    <div class="hint" style="margin-top:5px">Starts with sk-ant-</div>
+    <div class="modal-title">🔒 Sign In</div>
+    <div class="modal-sub">Enter the access password to use this tool.</div>
+    <label class="field-label">Password</label>
+    <input type="password" id="login-input" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    <div id="login-error" style="color:var(--red);font-size:12px;margin-top:6px;display:none"></div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeKeyModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveKey()">Save Key</button>
+      <button class="btn btn-primary" onclick="doLogin()" style="width:100%">Sign In</button>
     </div>
   </div>
 </div>
@@ -263,46 +299,100 @@
 <script>
 // ─── STATE ───────────────────────────────────────────────────────────────────
 const S = {
+  authed: false,
+  view: 'dashboard', // 'dashboard' | 'group'
   step: 0,
-  apiKey: "",
   templateFile: null,
-  files: [], // {file, role: 'carrier'|'renewal', pageRange, pageCount, status, data, error}
+  files: [], // current group's PDFs being processed
   clientName: "",
-  carriers: [], // [{carrier, plans:[]}]
+  carriers: [],
   renewalData: null,
-  selectedPlanIds: new Set(), // "ci-pi" identifiers
-  filter: "all", // all|competitive|cheapest
-  sort: "carrier", // carrier|rate|savings
+  selectedPlanIds: new Set(),
+  filter: "all",
+  sort: "carrier",
+  // Multi-group session
+  groups: [], // [{id, clientName, carriers, renewalData, selectedPlanIds: [...], templateFileB64, templateFileName}]
+  editingGroupId: null,
+  // Preview adjustments per group
+  previewEdits: {}, // {groupId: {planIdx: {fieldKey: value}}}
   error: "",
   warn: "",
+  info: "",
 };
 
 function set(patch) { Object.assign(S, patch); render(); }
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
-const STEPS = ["Upload", "Pages", "Extract", "Select Plans", "Generate"];
+const STEPS = ["Upload", "Pages", "Extract", "Select Plans", "Preview", "Generate"];
 
 // ─── KEY MODAL ───────────────────────────────────────────────────────────────
-function openKeyModal() {
-  document.getElementById("key-modal").classList.add("open");
-  document.getElementById("key-input").value = S.apiKey;
-}
-function closeKeyModal() { document.getElementById("key-modal").classList.remove("open"); }
-function saveKey() {
-  S.apiKey = document.getElementById("key-input").value.trim();
-  closeKeyModal();
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/auth/check');
+    const d = await r.json();
+    S.authed = !!d.authed;
+  } catch(e) { S.authed = false; }
   render();
 }
-function updateKey() {
-  const dot = document.getElementById("key-dot"), lbl = document.getElementById("key-label");
-  if (!dot) return;
-  if (S.apiKey) { dot.className = "key-dot"; lbl.textContent = "API Key Set"; }
-  else { dot.className = "key-dot missing"; lbl.textContent = "Set API Key"; }
+
+function showLogin() {
+  document.getElementById('login-modal').classList.add('open');
+  setTimeout(() => document.getElementById('login-input').focus(), 50);
+}
+
+async function doLogin() {
+  const pw = document.getElementById('login-input').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw})
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({}));
+      errEl.textContent = d.error?.message || 'Sign in failed';
+      errEl.style.display = 'block';
+      return;
+    }
+    document.getElementById('login-modal').classList.remove('open');
+    document.getElementById('login-input').value = '';
+    S.authed = true;
+    render();
+  } catch(e) {
+    errEl.textContent = 'Network error';
+    errEl.style.display = 'block';
+  }
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', {method:'POST'});
+  S.authed = false;
+  render();
+}
+
+function updateTopbar() {
+  const el = document.getElementById('topbar-actions');
+  if (!el) return;
+  if (S.authed) {
+    el.innerHTML = '<button class="key-btn" onclick="doLogout()">Sign Out</button>';
+  } else {
+    el.innerHTML = '';
+  }
 }
 
 // ─── RENDER ───────────────────────────────────────────────────────────────────
 function render() {
-  updateKey();
+  updateTopbar();
+
+  if (!S.authed) {
+    document.getElementById('alerts').innerHTML = '';
+    document.getElementById('steps').innerHTML = '';
+    document.getElementById('view').innerHTML = '';
+    showLogin();
+    return;
+  }
 
   // Alerts
   const a = document.getElementById("alerts");
@@ -312,24 +402,180 @@ function render() {
   if (S.info) html += `<div class="alert alert-info">📋 ${S.info}</div>`;
   a.innerHTML = html;
 
-  // Steps
-  document.getElementById("steps").innerHTML = STEPS.map((s, i) => {
-    const st = i < S.step ? "done" : i === S.step ? "active" : "idle";
-    return `<div class="step">
-      <div class="step-circle ${st}">${st === "done" ? "✓" : i + 1}</div>
-      <span class="step-text ${st}">${s}</span>
-    </div>${i < STEPS.length - 1 ? '<div class="step-line"></div>' : ''}`;
-  }).join("");
+  const stepsEl = document.getElementById('steps');
+  const viewEl = document.getElementById('view');
 
-  // View
-  const v = document.getElementById("view");
-  if (S.step === 0) v.innerHTML = viewUpload();
-  else if (S.step === 1) v.innerHTML = viewPages();
-  else if (S.step === 2) v.innerHTML = viewExtract();
-  else if (S.step === 3) v.innerHTML = viewSelect();
-  else if (S.step === 4) v.innerHTML = viewComplete();
+  if (S.view === 'dashboard') {
+    stepsEl.style.display = 'none';
+    viewEl.innerHTML = viewDashboard();
+  } else {
+    stepsEl.style.display = 'flex';
+    stepsEl.innerHTML = STEPS.map((s, i) => {
+      const st = i < S.step ? "done" : i === S.step ? "active" : "idle";
+      return `<div class="step">
+        <div class="step-circle ${st}">${st === "done" ? "✓" : i + 1}</div>
+        <span class="step-text ${st}">${s}</span>
+      </div>${i < STEPS.length - 1 ? '<div class="step-line"></div>' : ''}`;
+    }).join("");
+
+    if (S.step === 0) viewEl.innerHTML = viewUpload();
+    else if (S.step === 1) viewEl.innerHTML = viewPages();
+    else if (S.step === 2) viewEl.innerHTML = viewExtract();
+    else if (S.step === 3) viewEl.innerHTML = viewSelect();
+    else if (S.step === 4) viewEl.innerHTML = viewPreview();
+    else if (S.step === 5) viewEl.innerHTML = viewComplete();
+  }
 
   attachDropEvents();
+}
+
+// ─── DASHBOARD: MULTI-GROUP HOME ─────────────────────────────────────────────
+function viewDashboard() {
+  const groups = S.groups;
+  const readyCount = groups.filter(g => g.ready).length;
+
+  return `
+  <div class="dash-header">
+    <div style="flex:1">
+      <div class="dash-title">Your Quote Comparisons</div>
+      <div class="dash-sub">${groups.length === 0 ? 'Add your first group to get started.' : `${groups.length} group${groups.length!==1?'s':''} in this session · ${readyCount} ready to export`}</div>
+    </div>
+    <button class="btn btn-primary" onclick="startNewGroup()">+ Add Group</button>
+    ${readyCount > 0 ? `<button class="btn btn-accent" onclick="exportAllGroups()">Export All (${readyCount}) ↓</button>` : ''}
+  </div>
+
+  ${groups.length === 0 ? `
+    <div class="empty-state">
+      <div class="empty-icon">📋</div>
+      <div class="empty-title">No groups yet</div>
+      <div class="empty-sub">A group is one client with their carrier quotes and renewal contract.<br>Add as many as you need — each becomes its own Excel.</div>
+      <button class="btn btn-primary" onclick="startNewGroup()">+ Add Your First Group</button>
+    </div>
+  ` : groups.map(g => `
+    <div class="group-card">
+      <div style="font-size:24px">${g.ready ? '✅' : '📝'}</div>
+      <div class="group-card-info">
+        <div class="group-card-name">${escHtml(g.clientName)}<span class="group-card-status ${g.ready?'ready':'draft'}">${g.ready?'Ready':'Draft'}</span></div>
+        <div class="group-card-meta">
+          ${g.carriers ? `${g.carriers.length} carrier${g.carriers.length!==1?'s':''} · ` : ''}
+          ${g.selectedCount || 0} plan${(g.selectedCount||0)!==1?'s':''} selected
+          ${g.renewalData ? ' · 🔄 Renewal included' : ''}
+        </div>
+      </div>
+      <div class="group-card-actions">
+        <button class="btn btn-ghost" onclick="editGroup('${g.id}')">Edit</button>
+        ${g.ready ? `<button class="btn btn-primary" onclick="exportGroup('${g.id}')">Download ↓</button>` : ''}
+        <button class="btn btn-ghost" onclick="deleteGroup('${g.id}')" style="color:var(--red)">Remove</button>
+      </div>
+    </div>
+  `).join('')}`;
+}
+
+function startNewGroup() {
+  // Reset working state, enter group flow
+  Object.assign(S, {
+    view: 'group',
+    step: 0,
+    templateFile: null,
+    files: [],
+    clientName: '',
+    carriers: [],
+    renewalData: null,
+    selectedPlanIds: new Set(),
+    filter: 'all',
+    sort: 'carrier',
+    editingGroupId: null,
+    error: '',
+    warn: '',
+    info: ''
+  });
+  render();
+  setTimeout(updateGoBtn, 50);
+}
+
+function editGroup(id) {
+  const g = S.groups.find(x => x.id === id);
+  if (!g) return;
+  Object.assign(S, {
+    view: 'group',
+    step: 3,  // jump to selection
+    templateFile: g.templateFile,
+    clientName: g.clientName,
+    carriers: g.carriers || [],
+    renewalData: g.renewalData,
+    selectedPlanIds: new Set(g.selectedPlanIdsList || []),
+    editingGroupId: id,
+    files: [],
+    filter: 'all',
+    sort: 'carrier',
+    error: '',
+    warn: '',
+    info: ''
+  });
+  render();
+}
+
+function deleteGroup(id) {
+  if (!confirm('Remove this group?')) return;
+  S.groups = S.groups.filter(g => g.id !== id);
+  delete S.previewEdits[id];
+  render();
+}
+
+async function exportGroup(id) {
+  const g = S.groups.find(x => x.id === id);
+  if (!g) { set({ error: 'Group not found' }); return; }
+  await downloadExcelForGroup(g);
+}
+
+async function exportAllGroups() {
+  const ready = S.groups.filter(g => g.ready);
+  for (const g of ready) {
+    await downloadExcelForGroup(g);
+    await new Promise(r => setTimeout(r, 800));
+  }
+}
+
+async function downloadExcelForGroup(g) {
+  if (!g.templateFile) return set({ error: 'Template missing for this group' });
+  try {
+    const templateB64 = await fileToBase64(g.templateFile);
+    const allPlans = (g.carriers || []).flatMap((c, ci) =>
+      (c.plans || []).map((p, pi) => ({ id: `${ci}-${pi}`, ci, pi, carrier: c.carrier || 'Unknown', plan: p }))
+    );
+    const idSet = new Set(g.selectedPlanIdsList || []);
+    const selected = allPlans
+      .filter(p => idSet.has(p.id))
+      .map(p => {
+        // Apply preview edits if any
+        const edits = (S.previewEdits[g.id] || {})[p.id] || {};
+        return { carrier: edits._carrier || p.carrier, plan: { ...p.plan, ...edits } };
+      });
+
+    const resp = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        template: templateB64,
+        selectedPlans: selected,
+        clientName: g.clientName,
+        renewalData: g.renewalData
+      })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${g.clientName.replace(/\s+/g,'_')}_Medical_Comparison.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    set({ error: 'Excel generation failed: ' + e.message });
+  }
 }
 
 // ─── STEP 0: UPLOAD ──────────────────────────────────────────────────────────
@@ -387,6 +633,7 @@ function viewUpload() {
         <label class="field-label">Client Group Name</label>
         <input type="text" id="client-name" placeholder="e.g. Liberty Restoration Group" value="${escHtml(S.clientName)}" oninput="S.clientName=this.value;updateGoBtn()">
       </div>
+      <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Dashboard</button>
       <button class="btn btn-primary" id="go-btn" onclick="goToPages()">Continue →</button>
     </div>
     <div class="hint" id="go-hints"></div>
@@ -397,11 +644,10 @@ function updateGoBtn() {
   const btn = document.getElementById("go-btn");
   const hints = document.getElementById("go-hints");
   const hasCarrier = S.files.some(f => f.role === 'carrier');
-  const ok = S.clientName.trim() && hasCarrier && !!S.apiKey;
+  const ok = S.clientName.trim() && hasCarrier;
   if (btn) btn.disabled = !ok;
   if (hints) {
     let h = "";
-    if (!S.apiKey) h += "🔑 Set your API key (top right). ";
     if (!hasCarrier) h += "📄 Upload at least one Carrier Quote PDF. ";
     if (!S.clientName.trim()) h += "✏️ Enter the client group name.";
     hints.textContent = h;
@@ -485,7 +731,6 @@ function loadPdfJs() {
 }
 
 function goToPages() {
-  if (!S.apiKey) return set({ error: "Please set your API key (top right)." });
   if (!S.clientName.trim()) return set({ error: "Please enter the client group name." });
   if (!S.files.some(f => f.role === 'carrier')) return set({ error: "Please upload at least one Carrier Quote PDF." });
   set({ step: 1, error: '' });
@@ -756,10 +1001,19 @@ For the renewal plan, extract:
 - Out-of-network deductible, coinsurance, MOOP
 
 Return JSON in plans array with ONE plan object. Schema: ${schema}`
-        : `Extract all medical plans from this carrier quote PDF. Be concise. Return JSON matching this schema exactly: ${schema}`;
+        : `Extract all medical plans from this carrier quote PDF. Be concise.
+
+IMPORTANT - Rate column mappings (carriers use different abbreviations):
+- rate_ee = "Employee Only" / "EE Only" / "EE Total" / "Single" / "Employee"
+- rate_es = "Employee + Spouse" / "EE + Spouse" / "ES Total" / "EE+Sp"
+- rate_ec = "Employee + Child(ren)" / "EE + Child" / "EC Total" / "EE+Ch"
+- rate_fam = "Family" / "Employee + Family" / "EF Total" / "EE+Fam" / "Full Family"
+
+If rates are shown as PEPM (Per Employee Per Month) or monthly amounts, use them as-is. Extract numeric value only (no $ or commas).
+
+Return JSON matching this schema exactly: ${schema}`;
 
       const body = {
-        _apiKey: S.apiKey,
         model: "claude-sonnet-4-20250514",
         max_tokens: isRenewal ? 4000 : 16000,
         system: "Extract medical insurance data from carrier PDFs. Return ONLY valid compact JSON, no markdown, no code fences.",
@@ -943,8 +1197,8 @@ function viewSelect() {
         <div class="hint" style="margin-top:2px">${plans.length} plan${plans.length !== 1 ? 's' : ''} extracted from ${S.carriers.length} carrier${S.carriers.length !== 1 ? 's' : ''}</div>
       </div>
       <div class="spacer"></div>
-      <button class="btn btn-ghost" onclick="set({step:0,carriers:[],renewalData:null,selectedPlanIds:new Set()})">← Start Over</button>
-      <button class="btn btn-accent" onclick="generateExcel()" ${selectedCount === 0 ? 'disabled' : ''}>Generate Excel ↓</button>
+      <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Start Over</button>
+      <button class="btn btn-accent" onclick="set({step:4})" ${selectedCount === 0 ? 'disabled' : ''}>Preview & Verify →</button>
     </div>
   </div>
 
@@ -1011,8 +1265,8 @@ function viewSelect() {
   </div>
 
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
-    <button class="btn btn-ghost" onclick="set({step:0,carriers:[],renewalData:null,selectedPlanIds:new Set()})">← Start Over</button>
-    <button class="btn btn-accent" onclick="generateExcel()" ${selectedCount === 0 ? 'disabled' : ''}>Generate Excel ↓ (${selectedCount} selected)</button>
+    <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Start Over</button>
+    <button class="btn btn-accent" onclick="set({step:4})" ${selectedCount === 0 ? 'disabled' : ''}>Preview & Verify → (${selectedCount} selected)</button>
   </div>`;
 }
 
@@ -1040,71 +1294,315 @@ function clearSelection() {
   render();
 }
 
-// ─── STEP 4: COMPLETE ─────────────────────────────────────────────────────────
-function viewComplete() {
-  const fname = `${(S.clientName || "Group").replace(/\s+/g, "_")}_Medical_Comparison.xlsx`;
-  const selected = Array.from(S.selectedPlanIds);
+// ─── STEP 4: PREVIEW (editable spreadsheet) ─────────────────────────────────
+const PREVIEW_FIELDS = [
+  { section: 'Plan Info', rows: [
+    { key: 'plan_name',  label: 'Plan Name' },
+    { key: 'network',    label: 'Network' },
+  ]},
+  { section: 'Medical Benefits', rows: [
+    { key: 'ded_ind',    label: 'Deductible (Ind)' },
+    { key: 'ded_fam',    label: 'Deductible (Fam)' },
+    { key: 'coinsurance',label: 'Coinsurance' },
+    { key: 'moop_ind',   label: 'MOOP (Ind)' },
+    { key: 'moop_fam',   label: 'MOOP (Fam)' },
+  ]},
+  { section: 'Services & Copays', rows: [
+    { key: 'pcp',        label: 'PCP Copay' },
+    { key: 'telehealth', label: 'Telehealth' },
+    { key: 'specialist', label: 'Specialist Copay' },
+    { key: 'inpatient',  label: 'Inpatient' },
+    { key: 'op_facility',label: 'Outpatient Facility' },
+    { key: 'er',         label: 'ER' },
+    { key: 'urgent_care',label: 'Urgent Care' },
+    { key: 'lab',        label: 'Laboratory' },
+    { key: 'xray',       label: 'X-Ray' },
+    { key: 'imaging',    label: 'Imaging' },
+  ]},
+  { section: 'Out-of-Network', rows: [
+    { key: 'oon_ded',    label: 'OON Deductible' },
+    { key: 'oon_moop',   label: 'OON MOOP' },
+    { key: 'oon_coins',  label: 'OON Coinsurance' },
+  ]},
+  { section: 'Prescription', rows: [
+    { key: 'rx_ded',       label: 'Rx Deductible' },
+    { key: 'rx_generic',   label: 'Generic' },
+    { key: 'rx_preferred', label: 'Preferred Brand' },
+    { key: 'rx_nonpref',   label: 'Non-Preferred' },
+    { key: 'rx_specialty', label: 'Specialty' },
+  ]},
+  { section: 'Monthly Rates', rows: [
+    { key: 'rate_ee',  label: 'Employee Only',     numeric: true },
+    { key: 'rate_es',  label: 'Employee + Spouse', numeric: true },
+    { key: 'rate_ec',  label: 'Employee + Child',  numeric: true },
+    { key: 'rate_fam', label: 'Family',            numeric: true },
+  ]},
+  { section: 'Notes', rows: [
+    { key: 'notes', label: 'Rate Guarantee / Notes' },
+  ]},
+];
+
+function getPreviewPlans() {
+  const all = (S.carriers || []).flatMap((c, ci) =>
+    (c.plans || []).map((p, pi) => ({ id: `${ci}-${pi}`, ci, pi, carrier: c.carrier || 'Unknown', plan: p }))
+  );
+  return all.filter(p => S.selectedPlanIds.has(p.id));
+}
+
+function getPreviewValue(planId, fieldKey, fallback) {
+  const groupKey = S.editingGroupId || 'current';
+  const edits = (S.previewEdits[groupKey] || {})[planId] || {};
+  if (fieldKey in edits) return edits[fieldKey];
+  return fallback;
+}
+
+function setPreviewEdit(planId, fieldKey, value) {
+  const groupKey = S.editingGroupId || 'current';
+  if (!S.previewEdits[groupKey]) S.previewEdits[groupKey] = {};
+  if (!S.previewEdits[groupKey][planId]) S.previewEdits[groupKey][planId] = {};
+  S.previewEdits[groupKey][planId][fieldKey] = value;
+}
+
+function fmtRate(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  const n = Number(v);
+  if (isNaN(n)) return v;
+  return '$' + n.toFixed(2);
+}
+
+function viewPreview() {
+  const plans = getPreviewPlans();
+  const rd = S.renewalData;
+
+  if (plans.length === 0) {
+    return `<div class="card"><div class="empty-state">
+      <div class="empty-icon">⚠️</div>
+      <div class="empty-title">No plans selected</div>
+      <button class="btn btn-primary" onclick="set({step:3})">← Back to Plan Selection</button>
+    </div></div>`;
+  }
+
+  // Build all columns: renewal first if present
+  const cols = [];
+  if (rd) {
+    cols.push({ id: 'renewal', isRenewal: true, carrier: rd.carrier || 'Current Renewal', plan: rd });
+  }
+  plans.forEach(p => cols.push({ id: p.id, ci: p.ci, pi: p.pi, carrier: p.carrier, plan: p.plan }));
+
+  // Carrier header row with merged cells (in HTML using colspan)
+  const carrierGroups = [];
+  cols.forEach(c => {
+    const last = carrierGroups[carrierGroups.length - 1];
+    if (last && last.carrier === c.carrier && last.isRenewal === !!c.isRenewal) {
+      last.span += 1;
+      last.cols.push(c);
+    } else {
+      carrierGroups.push({ carrier: c.carrier, isRenewal: !!c.isRenewal, span: 1, cols: [c] });
+    }
+  });
+
+  const carrierHeaderHtml = carrierGroups.map(g =>
+    `<th colspan="${g.span}" class="${g.isRenewal ? 'renewal-header' : ''}">${escHtml(g.carrier)}</th>`
+  ).join('');
+
+  const planHeaderHtml = cols.map(c => {
+    const planName = c.isRenewal
+      ? (rd.plan_name || 'Current Plan')
+      : (c.plan.plan_name || '—');
+    const editable = !c.isRenewal;
+    return `<th class="${c.isRenewal?'renewal-header':''}">
+      ${editable
+        ? `<span class="editable-cell" contenteditable spellcheck="false" onblur="setPreviewEdit('${c.id}','plan_name',this.innerText)">${escHtml(planName)}</span>`
+        : escHtml(planName)
+      }
+    </th>`;
+  }).join('');
+
+  // Body
+  let body = '';
+  PREVIEW_FIELDS.forEach(section => {
+    body += `<tr class="section-header"><td class="label-cell" colspan="${cols.length + 1}">${section.section}</td></tr>`;
+    section.rows.forEach(field => {
+      let row = `<tr><td class="label-cell">${field.label}</td>`;
+      cols.forEach(c => {
+        const baseVal = c.plan[field.key] ?? '';
+        const val = c.isRenewal ? baseVal : getPreviewValue(c.id, field.key, baseVal);
+        const display = field.numeric ? fmtRate(val) : (val || '');
+        const cellCls = c.isRenewal ? 'renewal-col' : '';
+        if (c.isRenewal) {
+          row += `<td class="${cellCls}">${escHtml(String(display))}</td>`;
+        } else {
+          row += `<td class="${cellCls}"><span class="editable-cell" contenteditable spellcheck="false" onblur="onPreviewEdit(event,'${c.id}','${field.key}',${field.numeric?'true':'false'})">${escHtml(String(display))}</span></td>`;
+        }
+      });
+      row += '</tr>';
+      body += row;
+    });
+  });
+
+  // Savings summary
+  let savingsHtml = '';
+  if (rd && rd.rate_ee) {
+    const renEE = Number(rd.rate_ee) || 0;
+    const renFam = Number(rd.rate_fam) || 0;
+    const planEEs = plans.map(p => Number(getPreviewValue(p.id, 'rate_ee', p.plan.rate_ee)) || 0).filter(v => v > 0);
+    const planFams = plans.map(p => Number(getPreviewValue(p.id, 'rate_fam', p.plan.rate_fam)) || 0).filter(v => v > 0);
+    const avgEE = planEEs.length ? planEEs.reduce((a,b)=>a+b,0)/planEEs.length : 0;
+    const avgFam = planFams.length ? planFams.reduce((a,b)=>a+b,0)/planFams.length : 0;
+    const bestEE = planEEs.length ? Math.min(...planEEs) : 0;
+    const bestFam = planFams.length ? Math.min(...planFams) : 0;
+    const eeSavings = renEE && bestEE ? ((renEE - bestEE) / renEE * 100).toFixed(1) : '—';
+    const famSavings = renFam && bestFam ? ((renFam - bestFam) / renFam * 100).toFixed(1) : '—';
+
+    savingsHtml = `
+    <div class="savings-summary">
+      <div class="savings-stat">
+        <div class="savings-stat-label">Best EE Rate</div>
+        <div class="savings-stat-value" style="color:var(--green)">${bestEE?fmtRate(bestEE):'—'}</div>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:3px">vs renewal ${fmtRate(renEE)}</div>
+      </div>
+      <div class="savings-stat">
+        <div class="savings-stat-label">Best EE Savings</div>
+        <div class="savings-stat-value" style="color:var(--green)">${eeSavings === '—' ? '—' : (eeSavings>=0?'+':'')+eeSavings+'%'}</div>
+      </div>
+      <div class="savings-stat">
+        <div class="savings-stat-label">Best Family Rate</div>
+        <div class="savings-stat-value" style="color:var(--green)">${bestFam?fmtRate(bestFam):'—'}</div>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:3px">vs renewal ${fmtRate(renFam)}</div>
+      </div>
+      <div class="savings-stat">
+        <div class="savings-stat-label">Best Family Savings</div>
+        <div class="savings-stat-value" style="color:var(--green)">${famSavings === '—' ? '—' : (famSavings>=0?'+':'')+famSavings+'%'}</div>
+      </div>
+    </div>`;
+  }
 
   return `
-  <div class="card complete">
-    <div class="complete-icon">🎉</div>
-    <div class="complete-title">Excel ready</div>
-    <div class="complete-sub">
-      <strong>${escHtml(fname)}</strong> has been downloaded with ${selected.length} plan${selected.length !== 1 ? 's' : ''}.<br>
-      ${S.renewalData ? 'Renewal comparison rows are included below the rate section.' : ''}
+  <div class="card" style="margin-bottom:1rem">
+    <div class="row">
+      <div>
+        <div style="font-weight:600;font-size:16px;color:var(--gray-900)">${escHtml(S.clientName)} — Preview</div>
+        <div class="hint" style="margin-top:2px">Click any cell to edit. Verify the math before generating Excel.</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn btn-ghost" onclick="set({step:3})">← Back</button>
+      <button class="btn btn-primary" onclick="saveGroupAndContinue()">Looks Good — Continue →</button>
     </div>
-    <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="generateExcel()">Download Again ↓</button>
-      <button class="btn" onclick="set({step:3})">← Adjust Selection</button>
-      <button class="btn btn-ghost" onclick="resetApp()">Start New Group</button>
-    </div>
+  </div>
+
+  <div class="preview-toolbar">
+    <span class="preview-info">📋 ${cols.length} column${cols.length!==1?'s':''} ${rd?'(including renewal as leftmost)':''}</span>
+    <span class="spacer"></span>
+    <span class="preview-info">Edits made: ${Object.keys((S.previewEdits[S.editingGroupId||'current']||{})).length} plan${Object.keys((S.previewEdits[S.editingGroupId||'current']||{})).length!==1?'s':''}</span>
+  </div>
+
+  <div class="preview-table-wrap">
+    <table class="ptbl">
+      <thead>
+        <tr class="carrier-row">
+          <th rowspan="2" class="label-cell" style="background:var(--primary)!important;color:white">Field</th>
+          ${carrierHeaderHtml}
+        </tr>
+        <tr class="plan-row">
+          ${planHeaderHtml}
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>
+
+  ${savingsHtml}
+
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
+    <button class="btn btn-ghost" onclick="set({step:3})">← Back</button>
+    <button class="btn btn-primary" onclick="saveGroupAndContinue()">Looks Good — Save Group →</button>
   </div>`;
 }
 
-async function generateExcel() {
-  if (!S.templateFile) return set({ error: "No template file uploaded." });
-  if (S.selectedPlanIds.size === 0) return set({ error: "Select at least one plan." });
-
-  try {
-    const templateB64 = await fileToBase64(S.templateFile);
-    // Build the selectedPlans array in display order (carrier → plan within carrier)
-    const allPlans = getAllPlans();
-    const selected = allPlans
-      .filter(p => S.selectedPlanIds.has(p.id))
-      .map(p => ({ carrier: p.carrier, plan: p.plan }));
-
-    const resp = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        template: templateB64,
-        selectedPlans: selected,
-        clientName: S.clientName,
-        renewalData: S.renewalData
-      })
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: { message: resp.statusText } }));
-      throw new Error(err.error?.message || `HTTP ${resp.status}`);
-    }
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(S.clientName || "Group").replace(/\s+/g, "_")}_Medical_Comparison.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
-    set({ step: 4, error: '' });
-  } catch (e) {
-    set({ error: "Excel generation failed: " + e.message });
+function onPreviewEdit(event, planId, fieldKey, isNumeric) {
+  let val = event.target.innerText.trim();
+  if (isNumeric) {
+    const cleaned = val.replace(/[^\d.\-]/g, '');
+    val = cleaned === '' ? '' : Number(cleaned);
+    // Reformat display
+    if (val !== '') event.target.innerText = fmtRate(val);
   }
+  setPreviewEdit(planId, fieldKey, val);
+}
+
+function saveGroupAndContinue() {
+  // Save the working state as a Group
+  const id = S.editingGroupId || 'g_' + Date.now();
+  const plans = getPreviewPlans();
+
+  // Apply preview edits to the carriers data permanently
+  const editsKey = S.editingGroupId || 'current';
+  const edits = S.previewEdits[editsKey] || {};
+  const finalCarriers = JSON.parse(JSON.stringify(S.carriers));
+  Object.keys(edits).forEach(pid => {
+    const [ci, pi] = pid.split('-').map(Number);
+    if (finalCarriers[ci] && finalCarriers[ci].plans && finalCarriers[ci].plans[pi]) {
+      Object.assign(finalCarriers[ci].plans[pi], edits[pid]);
+    }
+  });
+
+  const groupData = {
+    id,
+    clientName: S.clientName,
+    templateFile: S.templateFile,
+    carriers: finalCarriers,
+    renewalData: S.renewalData,
+    selectedPlanIdsList: Array.from(S.selectedPlanIds),
+    selectedCount: S.selectedPlanIds.size,
+    ready: true
+  };
+
+  // Move edits under the new group id if it was a temp id
+  if (editsKey === 'current') {
+    S.previewEdits[id] = S.previewEdits['current'] || {};
+    delete S.previewEdits['current'];
+  }
+
+  if (S.editingGroupId) {
+    const idx = S.groups.findIndex(g => g.id === id);
+    if (idx >= 0) S.groups[idx] = groupData;
+    else S.groups.push(groupData);
+  } else {
+    S.groups.push(groupData);
+  }
+
+  // Reset working state and go back to dashboard
+  Object.assign(S, {
+    view: 'dashboard',
+    step: 0,
+    templateFile: null,
+    files: [],
+    clientName: '',
+    carriers: [],
+    renewalData: null,
+    selectedPlanIds: new Set(),
+    editingGroupId: null,
+    info: `✓ Group "${groupData.clientName}" saved.`
+  });
+  render();
+}
+
+// ─── STEP 5: COMPLETE ─────────────────────────────────────────────────────────
+function viewComplete() {
+  return `<div class="card" style="text-align:center;padding:3rem">
+    <div style="font-size:48px;margin-bottom:1rem">✅</div>
+    <div style="font-size:20px;font-weight:600;margin-bottom:8px">Group saved</div>
+    <div style="font-size:13px;color:var(--gray-600);margin-bottom:1.5rem">Returning to dashboard...</div>
+  </div>`;
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function resetApp() {
   Object.assign(S, {
+    view: 'dashboard',
     step: 0, templateFile: null, files: [], clientName: "",
     carriers: [], renewalData: null, selectedPlanIds: new Set(),
+    editingGroupId: null,
     filter: "all", sort: "carrier", error: "", warn: "", info: ""
   });
   render();
@@ -1163,8 +1661,8 @@ function attachDropEvents() {
   });
 }
 
-render();
-setTimeout(updateGoBtn, 50);
+checkAuth();
+setTimeout(updateGoBtn, 100);
 </script>
 </body>
 </html>
