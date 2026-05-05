@@ -388,8 +388,14 @@ def generate():
     plan_count = len(selected_plans)
     template_path = pick_template_path(plan_count)
 
+    # Diagnostics
+    available = [s for s, p in TEMPLATE_FILES.items() if p.exists()]
+    chosen_size = min(max(plan_count, 1), MAX_TEMPLATE_SIZE)
+    print(f"[generate] plan_count={plan_count}, chosen_size={chosen_size}, available_templates={available}, path_exists={template_path.exists() if template_path else False}")
+
     if not template_path or not template_path.exists():
-        return jsonify({"error": {"message": f"Template for {plan_count} plans is not configured. Upload one in Manage Templates."}}), 400
+        msg = f"No {chosen_size}-plan template uploaded. Available templates: {available or 'none'}. Upload via Manage Templates."
+        return jsonify({"error": {"message": msg}}), 400
 
     try:
         template_bytes = template_path.read_bytes()
