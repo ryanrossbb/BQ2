@@ -1144,23 +1144,17 @@ async function startExtraction() {
       const isRenewal = f.role === 'renewal';
       const schema = isRenewal ? RENEWAL_SCHEMA : CARRIER_SCHEMA;
       const prompt = isRenewal
-        ? `This is a current health insurance renewal document. Find the SINGLE renewal/proposed plan (NOT alternative plans being offered). Extract ALL benefit details and rates from the renewal plan section.
+        ? `Output ONLY valid JSON. No prose, no explanation, no preamble like "Looking at..." or "I can see...". Just the JSON object.
+
+Task: This is a current health insurance renewal document. Find the SINGLE renewal/proposed plan (NOT alternative plans being offered). Extract ALL benefit details and rates from the renewal plan section.
 
 CRITICAL: This PDF may show one renewal plan PLUS many alternatives in a multi-plan exhibit table. ONLY extract the renewal/proposed plan, ignore the alternatives.
 
-For the renewal plan, extract:
-- carrier name (e.g. "ACEC Life/Health Trust", "UnitedHealthcare")
-- plan_name (the plan code/name like "EHI6 PROformance")
-- network info
-- Deductible (in-network individual / family)
-- MOOP (out-of-pocket max in-network individual / family)
-- Coinsurance percentage
-- Office copays (PCP, Specialist, Urgent Care, ER, Inpatient)
-- Pharmacy/Rx tier copays (Generic, Preferred Brand, Non-Preferred, Specialty)
-- All four rate tiers (Employee Only, Employee + Spouse, Employee + Child(ren), Family)
-- Out-of-network deductible, coinsurance, MOOP
+For the renewal plan, extract: carrier name, plan_name, network info, Deductible (ind/fam), MOOP (ind/fam), Coinsurance %, Office copays (PCP, Specialist, Urgent Care, ER, Inpatient), Pharmacy/Rx tiers (Generic, Preferred, Non-Preferred, Specialty), all four rate tiers (EE, EE+Spouse, EE+Child, Family), and out-of-network details.
 
-Return JSON in plans array with ONE plan object. Schema: ${schema}`
+Return ONE plan in plans array. Schema: ${schema}
+
+Begin your response with { and end with }. No other text.`
         : `Extract medical plans from this carrier quote PDF.
 
 CRITICAL RULE: Only extract plans that have COMPLETE pricing data (all four rate tiers). A "plan" is only a valid plan if you can find its monthly rates in the document's pricing/rate table.
@@ -1184,8 +1178,8 @@ Return JSON matching this schema exactly: ${schema}`;
 
       const body = {
         model: "claude-sonnet-4-20250514",
-        max_tokens: isRenewal ? 4000 : 32000,
-        system: "Extract medical insurance data from carrier PDFs. Return ONLY valid compact JSON, no markdown, no code fences.",
+        max_tokens: isRenewal ? 8000 : 32000,
+        system: "You are a JSON extraction API. The very FIRST character of your response MUST be `{` and the very LAST character MUST be `}`. No preamble. No \"Looking at\". No \"Here is\". No markdown code fences. No explanation. Just JSON. If you cannot extract the data, return {\"carrier\":\"\",\"plans\":[]} — but always start with {.",
         messages: [{
           role: "user",
           content: [
@@ -1218,23 +1212,61 @@ Return JSON matching this schema exactly: ${schema}`;
       }
       const data = await resp.json();
       const text = data.content?.find(b => b.type === "text")?.text || "{}";
-      const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+      let parsed;
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (parseErr) {
+        // Fallback 1: Find first { and last } and parse between them
+        const jsonStart = cleaned.indexOf('{');
+        const jsonEnd = cleaned.lastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+          try {
+            parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+          } catch (e2) {
+            // Fallback 2: try to repair truncated JSON by closing arrays/objects
+            try {
+              let attempt = cleaned.substring(jsonStart);
+              // Add closing brackets if needed
+              const opens = (attempt.match(/{/g) || []).length;
+              const closes = (attempt.match(/}/g) || []).length;
+              const arrayOpens = (attempt.match(/\[/g) || []).length;
+              const arrayCloses = (attempt.match(/\]/g) || []).length;
+              if (opens > closes) attempt += "}".repeat(opens - closes);
+              if (arrayOpens > arrayCloses) attempt = attempt.substring(0, attempt.length - (opens - closes)) + "]".repeat(arrayOpens - arrayCloses) + "}".repeat(opens - closes);
+              parsed = JSON.parse(attempt);
+            } catch (e3) {
+              throw new Error(`JSON parse failed. Response started with: "${cleaned.substring(0,80)}..."`);
+            }
+          }
+        } else {
+          throw new Error(`No JSON object found. Response was: "${cleaned.substring(0,150)}..."`);
+        }
+      }
 
       f.data = parsed;
-      f.status = 'done';
 
       if (isRenewal) {
-        // renewal returns full carrier shape with plans[]; flatten to single plan + carrier name
         const rPlan = (parsed.plans && parsed.plans[0]) || {};
         renewalData = {
           carrier: parsed.carrier || 'Current Renewal',
           ...rPlan
         };
+        f.status = 'done';
+      } else {
+        const planCount = (parsed.plans || []).length;
+        if (planCount === 0) {
+          f.status = 'error';
+          f.error = `No plans extracted (Claude returned 0). Try a different page range or check the PDF format.`;
+        } else {
+          f.status = 'done';
+          carriers.push(parsed);
+        }
       }
-      else carriers.push(parsed);
     } catch (e) {
       f.status = 'error';
       f.error = e.message;
+      console.error(`Extraction error for ${f.file.name}:`, e);
     }
     render();
   }
@@ -1381,7 +1413,11 @@ function viewSelect() {
     <div class="row">
       <div>
         <div style="font-weight:600;font-size:16px;color:var(--gray-900)">${escHtml(S.clientName)}</div>
-        <div class="hint" style="margin-top:2px">${plans.length} plan${plans.length !== 1 ? 's' : ''} extracted from ${S.carriers.length} carrier${S.carriers.length !== 1 ? 's' : ''}</div>
+        <div class="hint" style="margin-top:2px">${plans.length} plan${plans.length !== 1 ? 's' : ''} extracted from ${S.carriers.length} carrier${S.carriers.length !== 1 ? 's' : ''}${(() => {
+  const errors = (S.files||[]).filter(f => f.status === 'error');
+  if (errors.length === 0) return '';
+  return ` · <span style="color:var(--red);font-weight:500">⚠️ ${errors.length} file${errors.length>1?'s':''} failed: ${errors.map(f => escHtml(f.file.name)).join(', ')}</span>`;
+})()}</div>
       </div>
       <div class="spacer"></div>
       <button class="btn btn-ghost" onclick="set({view:'dashboard'})">← Go Back</button>
