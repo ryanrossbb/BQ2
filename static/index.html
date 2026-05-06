@@ -1161,17 +1161,24 @@ For the renewal plan, extract:
 - Out-of-network deductible, coinsurance, MOOP
 
 Return JSON in plans array with ONE plan object. Schema: ${schema}`
-        : `Extract EVERY medical plan from this carrier quote PDF.
+        : `Extract medical plans from this carrier quote PDF.
 
-CRITICAL: For EVERY plan you extract, you MUST include all four rate fields with numeric values:
-- rate_ee (Employee Only / EE Only / EE Total / Single)
-- rate_es (Employee + Spouse / EE + Spouse / ES Total)
-- rate_ec (Employee + Child(ren) / EE + Child / EC Total)
-- rate_fam (Family / Employee + Family / EF Total / Full Family)
+CRITICAL RULE: Only extract plans that have COMPLETE pricing data (all four rate tiers). A "plan" is only a valid plan if you can find its monthly rates in the document's pricing/rate table.
 
-If rates are shown as PEPM or monthly amounts, use them as-is. Extract numeric value only (no $ or commas). NEVER skip rate fields - if a plan exists in the PDF, its rates exist too. Find them.
+DO NOT extract:
+- Plans that appear in benefit detail tables but have no rates in the pricing table
+- "Tier 1" / "Tier 2" sub-options of a plan (those are benefit variations, not separate plans)
+- Plan names that appear only as references or examples
 
-For benefit fields (deductible, copays, etc.), keep values brief (e.g. "$25" not "$25 copay per visit"). If a benefit field is not visible, use empty string "".
+Rate column mappings (carriers use different abbreviations):
+- rate_ee = Employee Only / EE Only / EE Total / Single / Employee
+- rate_es = Employee + Spouse / EE + Spouse / ES Total / EE+Sp
+- rate_ec = Employee + Child(ren) / EE + Child / EC Total / EE+Ch
+- rate_fam = Family / Employee + Family / EF Total / EE+Fam / Full Family
+
+Match the plan to its benefits by plan name across pages. If rates are shown as PEPM or monthly amounts, use them as-is. Extract numeric values only (no $ or commas).
+
+For benefit fields, keep values brief (e.g. "$25 copay" not "$25 copay per visit, applies after deductible"). Use empty string "" for missing fields.
 
 Return JSON matching this schema exactly: ${schema}`;
 
