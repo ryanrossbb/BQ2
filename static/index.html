@@ -1161,21 +1161,23 @@ For the renewal plan, extract:
 - Out-of-network deductible, coinsurance, MOOP
 
 Return JSON in plans array with ONE plan object. Schema: ${schema}`
-        : `Extract all medical plans from this carrier quote PDF. Be concise.
+        : `Extract EVERY medical plan from this carrier quote PDF.
 
-IMPORTANT - Rate column mappings (carriers use different abbreviations):
-- rate_ee = "Employee Only" / "EE Only" / "EE Total" / "Single" / "Employee"
-- rate_es = "Employee + Spouse" / "EE + Spouse" / "ES Total" / "EE+Sp"
-- rate_ec = "Employee + Child(ren)" / "EE + Child" / "EC Total" / "EE+Ch"
-- rate_fam = "Family" / "Employee + Family" / "EF Total" / "EE+Fam" / "Full Family"
+CRITICAL: For EVERY plan you extract, you MUST include all four rate fields with numeric values:
+- rate_ee (Employee Only / EE Only / EE Total / Single)
+- rate_es (Employee + Spouse / EE + Spouse / ES Total)
+- rate_ec (Employee + Child(ren) / EE + Child / EC Total)
+- rate_fam (Family / Employee + Family / EF Total / Full Family)
 
-If rates are shown as PEPM (Per Employee Per Month) or monthly amounts, use them as-is. Extract numeric value only (no $ or commas).
+If rates are shown as PEPM or monthly amounts, use them as-is. Extract numeric value only (no $ or commas). NEVER skip rate fields - if a plan exists in the PDF, its rates exist too. Find them.
+
+For benefit fields (deductible, copays, etc.), keep values brief (e.g. "$25" not "$25 copay per visit"). If a benefit field is not visible, use empty string "".
 
 Return JSON matching this schema exactly: ${schema}`;
 
       const body = {
         model: "claude-sonnet-4-20250514",
-        max_tokens: isRenewal ? 4000 : 16000,
+        max_tokens: isRenewal ? 4000 : 32000,
         system: "Extract medical insurance data from carrier PDFs. Return ONLY valid compact JSON, no markdown, no code fences.",
         messages: [{
           role: "user",
