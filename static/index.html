@@ -325,6 +325,21 @@ const S = {
 
 function set(patch) { Object.assign(S, patch); render(); }
 
+// Centralized fetch wrapper that handles session expiry
+window._origFetch = window._origFetch || window.fetch.bind(window);
+window.fetch = async function(...args) {
+  const resp = await window._origFetch(...args);
+  // Only redirect to login if 401 came from our API
+  const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+  if (resp.status === 401 && url.includes('/api/') && !url.includes('/api/auth/')) {
+    if (S.authed) {
+      S.authed = false;
+      set({ error: 'Session expired. Please sign in again.' });
+    }
+  }
+  return resp;
+};
+
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const STEPS = ["Upload", "Pages", "Extract", "Select Plans", "Preview", "Generate"];
 
@@ -1182,6 +1197,12 @@ Return JSON matching this schema exactly: ${schema}`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
+      if (resp.status === 401) {
+        // Session expired - send back to login and stop the loop
+        S.authed = false;
+        set({ error: 'Session expired. Please sign in again.', step: 0 });
+        return;
+      }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: { message: resp.statusText } }));
         throw new Error(err.error?.message || `HTTP ${resp.status}`);
@@ -1217,7 +1238,15 @@ Return JSON matching this schema exactly: ${schema}`;
 
   const totalPlans = carriers.reduce((sum, c) => sum + (c.plans || []).length, 0);
   if (!totalPlans) {
-    set({ error: "No plans were extracted. Try adjusting the page selection.", step: 0 });
+    // Surface the underlying error from any file that had problems
+    const errorFiles = S.files.filter(f => f.status === 'error');
+    let msg = "No plans were extracted.";
+    if (errorFiles.length > 0) {
+      msg += " Errors: " + errorFiles.map(f => `${f.file.name}: ${f.error}`).join('; ');
+    } else {
+      msg += " Try adjusting the page selection.";
+    }
+    set({ error: msg, step: 0 });
     return;
   }
 
