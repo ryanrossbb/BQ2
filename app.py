@@ -138,22 +138,35 @@ def build_value(field_key, plan):
 def find_template_anchors(ws):
     max_col = ws.max_column or 30
     start_col, carrier_row, plan_row = 8, -1, -1
-    for r in range(10, 30):
-        for c in range(6, min(max_col + 1, 35)):
+    # Search broader range and lower starting col since templates may use earlier columns
+    for r in range(8, 32):
+        for c in range(4, min(max_col + 1, 35)):
             raw = ws.cell(r, c).value
             if raw is None: continue
             v = str(raw).strip().lower()
             if v in ("plan 1", "plan #1", "plan#1"):
                 start_col, plan_row = c, r
-                for cr in range(r - 1, max(r - 4, 0), -1):
-                    if ws.cell(cr, c).value is not None:
+                # Look up to 4 rows above for the carrier row
+                for cr in range(r - 1, max(r - 5, 0), -1):
+                    cv = ws.cell(cr, c).value
+                    if cv is not None:
                         carrier_row = cr
                         break
                 break
-            if ("carrier 1" in v or v == "carrier1") and carrier_row < 0:
-                carrier_row = r
-                start_col = c
         if plan_row > 0: break
+    # Fallback: if no Plan 1 found, look for "Carrier 1" or "Current"
+    if plan_row < 0:
+        for r in range(8, 32):
+            for c in range(4, min(max_col + 1, 35)):
+                raw = ws.cell(r, c).value
+                if raw is None: continue
+                v = str(raw).strip().lower()
+                if v in ("carrier 1", "carrier1", "current"):
+                    carrier_row = r
+                    start_col = c
+                    plan_row = r + 1
+                    break
+            if plan_row > 0: break
     if carrier_row > 0 and plan_row < 0:
         plan_row = carrier_row + 1
     if plan_row < 0:
@@ -195,12 +208,41 @@ def write_excel_bundled(template_bytes, selected_bundles, client_name, renewal_b
     ws = next((wb[n] for n in wb.sheetnames if "medical" in n.lower()), wb.active)
     max_row = ws.max_row
 
-    # Map row labels to row numbers
+    # Map row labels to row numbers — context-aware (In-Network vs Out-of-Network)
+    # When we hit a section header, switch the prefix used for ambiguous fields like Deductible/MOOP
     row_map = {}
+    section = "in"  # "in" or "oon"
     for r in range(1, max_row + 1):
         v = ws.cell(r, 3).value
-        if v and str(v).strip() in LABEL_MAP:
-            row_map[LABEL_MAP[str(v).strip()]] = r
+        if not v:
+            continue
+        s = str(v).strip()
+        s_low = s.lower()
+        # Detect section transitions
+        if "out-of-network" in s_low or "out of network" in s_low:
+            section = "oon"
+            continue
+        if "in-network" in s_low or "in network" in s_low or "prescription" in s_low or "monthly rates" in s_low or "financial" in s_low:
+            # Reset section on entering known In-Network/Rx/Rates blocks (Rx/Rates rows aren't ambiguous)
+            if "out" not in s_low:
+                section = "in" if "out" not in s_low else "oon"
+            if "prescription" in s_low or "monthly rates" in s_low or "financial" in s_low:
+                section = "in"  # Rx and rates use distinct field keys, doesn't matter
+            else:
+                section = "in"
+            continue
+        # Look up the label
+        if s in LABEL_MAP:
+            key = LABEL_MAP[s]
+            # Only remap key based on section for the truly ambiguous fields
+            if section == "oon":
+                if key == "ded":         key = "oon_ded"
+                elif key == "moop":      key = "oon_moop"
+                elif key == "coinsurance": key = "oon_coins"
+                elif key == "rx_ded":    key = "rx_ded"  # Rx rows usually appear before OON
+            # Only set if not already mapped (first occurrence wins)
+            if key not in row_map:
+                row_map[key] = r
 
     start_col, carrier_row, plan_row = find_template_anchors(ws)
     if not selected_bundles and not renewal_bundle:
@@ -280,33 +322,33 @@ def write_excel_bundled(template_bytes, selected_bundles, client_name, renewal_b
                 ws.merge_cells(start_row=carrier_row, start_column=bundle_first_col,
                                end_row=carrier_row, end_column=bundle_last_col)
 
-    # Clear leftover placeholder text in unused bundle slots beyond what we wrote
+    # Clear ALL leftover content (including styled-empty placeholder columns) in unused slots
     last_used_col = start_col + len(bundles) * bundle_size - 1
+    from openpyxl.styles import PatternFill, Border, Side, Font, Alignment
+    blank_fill = PatternFill(fill_type=None)
+    blank_font = Font()
+    blank_border = Border()
+    blank_alignment = Alignment()
     for c in range(last_used_col + 1, ws.max_column + 1):
-        # Carrier row, plan row: clear placeholder text and any merge that starts here
-        for r in [carrier_row, plan_row]:
-            if r > 0:
-                for merged in list(ws.merged_cells.ranges):
-                    if (merged.min_row <= r <= merged.max_row and
-                            merged.min_col <= c <= merged.max_col):
-                        ws.unmerge_cells(str(merged))
-                        break
-                cell_val = ws.cell(r, c).value
-                if cell_val:
-                    s = str(cell_val).lower().strip()
-                    if any(k in s for k in ("carrier ", "plan ", "carrier#", "plan#")):
-                        ws.cell(r, c).value = None
+        # First, unmerge any merges that touch this column above row plan_row+1 (header area)
+        # and below in benefit area
+        for merged in list(ws.merged_cells.ranges):
+            # Only unmerge ranges that contain this column AND are entirely within columns >= last_used_col+1
+            # (don't unmerge label columns C, D)
+            if merged.min_col >= last_used_col + 1 and merged.min_col <= c <= merged.max_col:
+                ws.unmerge_cells(str(merged))
 
-        # Clear demo data in benefit rows
-        for field_key, row in row_map.items():
-            cell_val = ws.cell(row, c).value
-            if cell_val is not None:
-                for merged in list(ws.merged_cells.ranges):
-                    if (merged.min_row <= row <= merged.max_row and
-                            merged.min_col <= c <= merged.max_col):
-                        ws.unmerge_cells(str(merged))
-                        break
-                ws.cell(row, c).value = None
+        # Clear ALL cells in this column from carrier_row down through the data rows
+        if carrier_row > 0:
+            data_end = max(row_map.values()) if row_map else carrier_row + 30
+            for r in range(carrier_row, data_end + 1):
+                cell = ws.cell(r, c)
+                cell.value = None
+                # Strip styling so it doesn't look like a populated column
+                cell.fill = blank_fill
+                cell.font = blank_font
+                cell.border = blank_border
+                cell.alignment = blank_alignment
 
     buf = io.BytesIO()
     wb.save(buf)
